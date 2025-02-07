@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  infinity-stream:
+    image: ghcr.io/${GITHUB_USERNAME}/infinity-stream:latest
+    volumes:
+      - ./downloaded_media:/app/downloaded_media
+    ports:
+      - "8554:8554"
+    restart: unless-stopped
+    environment:
+      - TZ=UTC
+      - TRELLO_API_KEY=${TRELLO_API_KEY}
+      - TRELLO_TOKEN=${TRELLO_TOKEN}
+      - TRELLO_BOARD_NAME=🧱 Radio
