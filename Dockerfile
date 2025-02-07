@@ -5,7 +5,7 @@ FROM python:3.9-slim
 RUN apt-get update && apt-get install -y \
     vlc \
     libmagic1 \
-    gettext-base \  # Added for envsubst command
+    gettext-base \
     && rm -rf /var/lib/apt/lists/*
 
 # Create and set working directory
