@@ -1,0 +1,3 @@
+python-trello==4.2.1
+requests==2.31.0
+python-magic==0.4.27
