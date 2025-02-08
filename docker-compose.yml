@@ -6,13 +6,13 @@ services:
     volumes:
       - ./downloaded_media:/app/downloaded_media
     ports:
-      - "8554:8554"
+      - "8080:8080"
     restart: unless-stopped
     environment:
       - TZ=UTC
       - TRELLO_API_KEY=${TRELLO_API_KEY}
       - TRELLO_TOKEN=${TRELLO_TOKEN}
-      - TRELLO_BOARD_NAME=🧱 Radio
+      - TRELLO_BOARD_NAME=🧱 Radio
     # Add labels for Watchtower to monitor this container
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
