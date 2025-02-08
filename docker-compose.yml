@@ -12,7 +12,7 @@ services:
       - TZ=UTC
       - TRELLO_API_KEY=${TRELLO_API_KEY}
       - TRELLO_TOKEN=${TRELLO_TOKEN}
-      - TRELLO_BOARD_NAME= Radio
+      - TRELLO_BOARD_NAME=🧱 Radio
     # Add labels for Watchtower to monitor this container
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
