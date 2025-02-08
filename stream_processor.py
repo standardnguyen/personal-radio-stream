@@ -1,132 +1,31 @@
 # stream_processor.py
 
-from flask import Flask, send_from_directory
 from threading import Thread
-import time
 from typing import Optional
-import os
+from pathlib import Path
+import time
+import sys
+import logging
+
 from config_manager import StreamConfig, LoggerSetup
 from trello_manager import TrelloManager
 from media_manager import MediaManager
-
-# Initialize Flask application for serving HLS streams
-app = Flask(__name__)
+from web_server import StreamServer
+from player_template import PlayerTemplate
+from queue_processor import QueueProcessor
 
 class StreamQueueProcessor:
     """
-    Main processor that coordinates Trello queue management and media streaming.
-    This class serves as the central hub that:
-    1. Manages the web server for HLS streaming
-    2. Processes the Trello queue
-    3. Handles media file downloading and streaming
-    4. Maintains continuous playback between tracks
-    """
+    Main processor that coordinates all components of the streaming system.
+    Acts as a facade for the web server, queue processor, and media management.
     
-    # HTML template for the web player with HLS.js for broader browser support
-    PLAYER_HTML = '''<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stream Player</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.12/hls.min.js"></script>
-    <style>
-        body {
-            margin: 0;
-            padding: 20px;
-            font-family: system-ui, -apple-system, sans-serif;
-            background: #f5f5f5;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .player-wrapper {
-            width: 100%;
-            margin: 20px 0;
-        }
-        #videoPlayer {
-            width: 100%;
-            background: #000;
-            border-radius: 4px;
-        }
-        .status {
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 4px;
-            background: #e8f5e9;
-            color: #2e7d32;
-        }
-        .error {
-            background: #ffebee;
-            color: #c62828;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Stream Player</h1>
-        <div class="player-wrapper">
-            <video id="videoPlayer" controls></video>
-        </div>
-        <div id="status" class="status">Connecting to stream...</div>
-    </div>
-
-    <script>
-        const video = document.getElementById('videoPlayer');
-        const status = document.getElementById('status');
-        const streamUrl = '/stream/playlist.m3u8';
-
-        function initPlayer() {
-            if (Hls.isSupported()) {
-                const hls = new Hls({
-                    debug: false,
-                    enableWorker: true,
-                    lowLatencyMode: true,
-                    backBufferLength: 90
-                });
-                
-                hls.loadSource(streamUrl);
-                hls.attachMedia(video);
-                
-                hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    status.textContent = 'Stream ready - Playing...';
-                    video.play().catch(e => {
-                        status.textContent = 'Click play to start streaming';
-                    });
-                });
-
-                hls.on(Hls.Events.ERROR, (event, data) => {
-                    if (data.fatal) {
-                        status.className = 'status error';
-                        status.textContent = 'Stream error - Reconnecting...';
-                        setTimeout(() => hls.loadSource(streamUrl), 2000);
-                    }
-                });
-            }
-            else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                video.src = streamUrl;
-                video.addEventListener('loadedmetadata', () => {
-                    status.textContent = 'Stream ready - Playing...';
-                    video.play().catch(e => {
-                        status.textContent = 'Click play to start streaming';
-                    });
-                });
-            }
-            else {
-                status.className = 'status error';
-                status.textContent = 'Your browser does not support HLS playback';
-            }
-        }
-
-        initPlayer();
-    </script>
-</body>
-</html>'''
+    This class serves as the central hub that:
+    1. Initializes and manages all system components
+    2. Coordinates the web server for HLS streaming
+    3. Manages the Trello-based queue system
+    4. Handles media file processing and streaming
+    5. Maintains system cleanup and resource management
+    """
     
     def __init__(
         self,
@@ -170,198 +69,131 @@ class StreamQueueProcessor:
         # Set up logging
         self.logger = LoggerSetup.setup_logger('StreamProcessor', log_file)
         
-        # Initialize components
-        self.trello = TrelloManager(self.config, self.logger)
-        self.media = MediaManager(self.config, self.logger)
-        
-        # Set up Flask routes and create player page
-        self._setup_flask_routes()
-        self._create_player_page()
-        
-        self.is_running = False
-        self.last_cleanup = time.time()
+        try:
+            # Initialize core components
+            self.logger.info("Initializing system components...")
+            
+            # Trello manager for queue management
+            self.trello = TrelloManager(self.config, self.logger)
+            
+            # Media manager for file handling and streaming
+            self.media = MediaManager(self.config, self.logger)
+            
+            # Web server for HLS streaming
+            self.server = StreamServer(self.config.hls_dir)
+            
+            # Queue processor for handling media queue
+            self.queue_processor = QueueProcessor(
+                self.trello,
+                self.media,
+                self.config.cleanup_interval,
+                self.logger
+            )
+            
+            # Create player page
+            PlayerTemplate.create_player_page(self.config.hls_dir)
+            
+            # Initialize thread tracking
+            self.server_thread: Optional[Thread] = None
+            self.is_running = False
+            
+            self.logger.info("System components initialized successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Error during initialization: {str(e)}")
+            raise
     
-    def _setup_flask_routes(self) -> None:
-        """
-        Configure Flask routes with proper MIME types for both web and VLC playback.
-        This method sets up routes for:
-        1. The web player interface
-        2. HLS playlist access
-        3. Media segment delivery
-        """
-        
-        @app.route('/')
-        def index():
-            """Serve the main player page"""
-            return send_from_directory(str(self.config.hls_dir), 'player.html')
-
-        @app.route('/stream/<path:filename>')
-        def serve_hls(filename):
-            """
-            Serve HLS playlist and segments with appropriate MIME types.
-            Handles different client types (browsers vs media players) correctly.
-            """
-            file_path = self.config.hls_dir / filename
-            
-            # Set content type based on file extension
-            if filename.endswith('.m3u8'):
-                mimetype = 'application/vnd.apple.mpegurl'
-                response = send_from_directory(
-                    str(self.config.hls_dir),
-                    filename,
-                    mimetype=mimetype
-                )
-                response.headers['Content-Type'] = mimetype
-                response.headers['Content-Disposition'] = 'inline'
-            elif filename.endswith('.ts'):
-                # MPEG-2 Transport Stream segments
-                mimetype = 'video/mp2t'
-                response = send_from_directory(
-                    str(self.config.hls_dir),
-                    filename,
-                    mimetype=mimetype
-                )
-            else:
-                # Other static files (like the player page)
-                response = send_from_directory(str(self.config.hls_dir), filename)
-            
-            # Add security headers
-            response.headers['Access-Control-Allow-Origin'] = '*'
-            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
-            
-            return response
-
-    def _create_player_page(self) -> None:
-        """Create the HTML5 player page with HLS.js support"""
-        player_path = self.config.hls_dir / 'player.html'
-        with open(player_path, 'w') as f:
-            f.write(self.PLAYER_HTML)
-
     def start(self) -> None:
         """
         Start all processor components including web server and queue processing.
-        This method initializes three daemon threads:
-        1. Flask server for HLS streaming
-        2. Queue processor for handling Trello cards
-        3. Cleanup thread for managing storage
+        This method initializes and starts:
+        1. The web server for HLS streaming
+        2. The queue processor for handling Trello cards
         """
         try:
             self.is_running = True
             
-            # Start Flask server thread
-            self.logger.info(f"Starting Flask server on port {self.config.stream_port}...")
+            # Start web server
+            self.logger.info(f"Starting web server on port {self.config.stream_port}...")
             self.server_thread = Thread(
-                target=lambda: app.run(
-                    host='0.0.0.0',
-                    port=self.config.stream_port,
-                    debug=False,
-                    use_reloader=False
-                )
+                target=lambda: self.server.run(port=self.config.stream_port)
             )
             self.server_thread.daemon = True
             self.server_thread.start()
             
-            # Start queue processing thread
-            self.logger.info("Starting queue processing thread...")
-            self.process_thread = Thread(target=self._process_queue)
-            self.process_thread.daemon = True
-            self.process_thread.start()
+            # Start queue processor
+            self.logger.info("Starting queue processor...")
+            self.queue_processor.start()
             
-            # Start cleanup thread
-            self.logger.info("Starting cleanup thread...")
-            self.cleanup_thread = Thread(target=self._cleanup_routine)
-            self.cleanup_thread.daemon = True
-            self.cleanup_thread.start()
+            self.logger.info("All components started successfully")
             
         except Exception as e:
             self.logger.error(f"Error starting processor: {str(e)}")
             self.stop()
             raise
-
+    
     def stop(self) -> None:
         """
         Stop all processor components and clean up resources.
-        This includes stopping the current stream and cleaning up HLS segments.
+        This includes:
+        1. Stopping the queue processor
+        2. Stopping any active streams
+        3. Cleaning up HLS segments
         """
         self.logger.info("Stopping stream processor...")
         self.is_running = False
         
-        # Stop current stream
-        self.media.stop_stream()
-        
-        # Clean up HLS segments
-        self.logger.info("Cleaning up HLS segments...")
-        for file in self.config.hls_dir.glob("*"):
-            try:
-                file.unlink()
-            except Exception as e:
-                self.logger.error(f"Error deleting {file}: {str(e)}")
-
-    def _process_queue(self) -> None:
-        """
-        Main queue processing loop that continuously checks for new cards
-        and processes them with continuous playback support.
-        """
-        while self.is_running:
-            try:
-                # Get all cards from Queue list
-                queue_cards = self.trello.get_queue_cards()
-                
-                if queue_cards:
-                    for card in queue_cards:
-                        self.logger.info(f"Processing card: {card.name}")
-                        
-                        # Move card to Now Playing
-                        self.trello.move_card_to_list(card, 'Now Playing')
-                        
-                        # Get media attachment
-                        attachments = self.trello.get_card_attachments(card)
-                        if not attachments:
-                            self.logger.warning(f"No attachments found on card: {card.name}")
-                            self.trello.move_card_to_list(card, 'Played')
-                            continue
-                        
-                        # Download and validate the first attachment
-                        attachment = attachments[0]
-                        media_path = self.media.download_attachment(attachment)
-                        
-                        if not media_path:
-                            self.logger.error(f"Failed to download attachment from card: {card.name}")
-                            self.trello.move_card_to_list(card, 'Played')
-                            continue
-                        
-                        # Get duration from card description if available
-                        try:
-                            duration = int(card.description) if card.description.strip().isdigit() else None
-                        except (AttributeError, ValueError):
-                            duration = None
-                        
-                        # Stream the media with continuous playback
-                        self.media.stream_media(media_path, duration, wait_for_completion=True)
-                        
-                        # Move card to Played list after completion
-                        self.trello.move_card_to_list(card, 'Played')
-                        
-                        # Check if cleanup is needed
-                        if time.time() - self.last_cleanup > self.config.cleanup_interval:
-                            self._cleanup_routine()
-                
-                time.sleep(5)  # Prevent excessive API calls
-                
-            except Exception as e:
-                self.logger.error(f"Error in queue processing: {str(e)}")
-                time.sleep(30)  # Wait longer on error
-
-    def _cleanup_routine(self) -> None:
-        """
-        Periodic cleanup handler that manages storage and old files.
-        This method is called automatically when the cleanup interval is reached.
-        """
         try:
-            self.logger.info("Starting cleanup routine...")
-            self.media.cleanup_media()
-            self.last_cleanup = time.time()
-            self.logger.info("Cleanup completed")
+            # Stop queue processor
+            if self.queue_processor:
+                self.queue_processor.stop()
+            
+            # Stop current stream
+            if self.media:
+                self.media.stop_stream()
+            
+            # Clean up HLS segments
+            self.logger.info("Cleaning up HLS segments...")
+            for file in self.config.hls_dir.glob("*"):
+                if file.is_file() and file.suffix in ['.ts', '.m3u8']:
+                    try:
+                        file.unlink()
+                    except Exception as e:
+                        self.logger.error(f"Error deleting {file}: {str(e)}")
+            
+            self.logger.info("Stream processor stopped successfully")
             
         except Exception as e:
-            self.logger.error(f"Error during cleanup: {str(e)}")
+            self.logger.error(f"Error during shutdown: {str(e)}")
+            raise
+    
+    def get_stream_url(self) -> str:
+        """
+        Get the URL for accessing the HLS stream
+        
+        Returns:
+            str: URL to the HLS playlist
+        """
+        return f"http://localhost:{self.config.stream_port}/stream/playlist.m3u8"
+    
+    def get_player_url(self) -> str:
+        """
+        Get the URL for accessing the web player
+        
+        Returns:
+            str: URL to the web player interface
+        """
+        return f"http://localhost:{self.config.stream_port}/"
+    
+    def display_usage_info(self) -> None:
+        """Display usage information for the streaming system"""
+        self.logger.info("\nStream Processor Usage Information:")
+        self.logger.info("1. Add a card to the 'Queue' list in your Trello board")
+        self.logger.info("2. Attach a media file to the card")
+        self.logger.info("3. (Optional) Add duration in seconds in the card description")
+        self.logger.info("\nAccess Points:")
+        self.logger.info(f"- Web Player: {self.get_player_url()}")
+        self.logger.info(f"- HLS Stream: {self.get_stream_url()}")
+        self.logger.info("\nSupported Media Types:")
+        self.logger.info("- Video: MP4, MPEG, AVI, MKV, WebM, MOV, FLV")
+        self.logger.info("- Audio: MP3, WAV, AAC, OGG, FLAC, M4A")
