@@ -1,4 +1,4 @@
-py-trello==0.19.0
+py-trello==0.20.1
 requests==2.31.0
 python-magic==0.4.27
 flask==3.0.2
