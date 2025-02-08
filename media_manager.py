@@ -25,7 +25,7 @@ class MediaManager:
             'video/webm', 'video/quicktime', 'video/x-flv'
         ],
         'audio': [
-            'audio/mpeg', 'audio/wav', 'audio/aac', 'audio/ogg',
+            'audio/mpeg', 'audio/wav',  'audio/x-wav', 'audio/aac', 'audio/ogg',
             'audio/flac', 'audio/x-m4a', 'audio/mp4'
         ]
     }
