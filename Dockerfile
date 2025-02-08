@@ -1,9 +1,9 @@
 # Start with Python base image
 FROM python:3.9-slim
 
-# Install VLC and other dependencies
+# Install FFmpeg and other dependencies
 RUN apt-get update && apt-get install -y \
-    vlc \
+    ffmpeg \
     libmagic1 \
     gettext-base \
     && rm -rf /var/lib/apt/lists/*
@@ -15,24 +15,20 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt flask
 
 # Copy application code
 COPY . .
 
-# Create media directory
-RUN mkdir -p downloaded_media
+# Create media and HLS directories
+RUN mkdir -p downloaded_media hls_segments
 
-# Create a non-root user for running VLC
-RUN useradd -m vlcuser && \
-    chown -R vlcuser:vlcuser /app
-
-# Create an entrypoint script to handle configuration
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Create a non-root user
+RUN useradd -m streamuser && \
+    chown -R streamuser:streamuser /app
 
 # Switch to non-root user
-USER vlcuser
+USER streamuser
 
 # Use the entrypoint script
 ENTRYPOINT ["docker-entrypoint.sh"]
