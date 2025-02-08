@@ -1,10 +1,10 @@
-# start_stream.py
-
 from stream_processor import StreamQueueProcessor
 import configparser
 import logging
 import sys
 import os
+import signal
+import time
 
 def load_config():
     """
@@ -35,6 +35,13 @@ def load_config():
         logger.error(f"Error loading configuration: {str(e)}")
         raise
 
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully"""
+    logger.info(f"\nReceived signal {signum}. Shutting down...")
+    if 'processor' in globals():
+        processor.stop()
+    sys.exit(0)
+
 def main():
     """
     Main entry point for the stream processor application.
@@ -53,10 +60,15 @@ def main():
         )
         logger = logging.getLogger(__name__)
         
+        # Register signal handlers
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
+        
         # Load configuration
         config = load_config()
         
         # Initialize the processor
+        global processor
         logger.info("Initializing StreamQueueProcessor...")
         processor = StreamQueueProcessor(
             trello_api_key=config['Trello']['api_key'],
@@ -74,16 +86,16 @@ def main():
         processor.start()
         
         # Display usage information
-        logger.info("\nProcessor is running! Press Ctrl+C to stop.")
+        logger.info("\nProcessor is running! Use CTRL+C to stop.")
         logger.info("\nTo use:")
         logger.info("1. Add a card to the 'Queue' list in your Trello board")
         logger.info("2. Attach a media file to the card")
         logger.info("3. (Optional) Add duration in seconds in the card description")
         logger.info(f"\nStream will be available at: http://localhost:{config['Stream'].get('port', '8080')}/stream/playlist.m3u8")
         
-        # Keep the script running
+        # Keep the main thread alive without using input()
         while True:
-            input()
+            time.sleep(1)
             
     except KeyboardInterrupt:
         logger.info("\nStopping stream processor...")
