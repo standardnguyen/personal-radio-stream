@@ -17,7 +17,7 @@ class MediaManager:
     SUPPORTED_FORMATS = {
         'video': ['video/mp4', 'video/mpeg', 'video/avi', 'video/x-matroska',
                  'video/webm', 'video/quicktime', 'video/x-flv'],
-        'audio': ['audio/mpeg', 'audio/wav', 'audio/aac', 'audio/ogg',
+        'audio': ['audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/aac', 'audio/ogg',
                  'audio/flac', 'audio/x-m4a']
     }
     
