@@ -1,10 +1,10 @@
 # stream_processor.py
 
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, redirect
 from threading import Thread
 import time
 from typing import Optional
-import os  # Added for environment variable checks
+import os
 from config_manager import StreamConfig, LoggerSetup
 from trello_manager import TrelloManager
 from media_manager import MediaManager
@@ -16,7 +16,7 @@ class StreamQueueProcessor:
     """
     Main processor that coordinates Trello queue management and media streaming.
     Uses separate components for configuration, Trello operations, and media handling.
-    Now includes HTTPS support for secure streaming.
+    Includes HTTPS support for secure streaming and root URL redirection.
     """
     
     def __init__(
@@ -31,7 +31,20 @@ class StreamQueueProcessor:
         stream_port: int = 8080,
         log_file: str = "stream_processor.log"
     ):
-        """Initialize the stream processor with all required components"""
+        """
+        Initialize the stream processor with all required components
+        
+        Args:
+            trello_api_key: API key for Trello authentication
+            trello_token: Token for Trello authentication
+            board_name: Name of the Trello board to use
+            list_name: Name of the list for the queue
+            media_dir: Directory to store downloaded media files
+            cleanup_interval_hours: How often to run cleanup (in hours)
+            max_storage_mb: Maximum storage limit in megabytes
+            stream_port: Port number for the streaming server
+            log_file: Path to the log file
+        """
         # Create configuration
         self.config = StreamConfig(
             trello_api_key=trello_api_key,
@@ -62,7 +75,13 @@ class StreamQueueProcessor:
         """
         Configure Flask routes for HLS streaming with HTTPS support.
         Adds security headers for HTTPS enforcement when running on DigitalOcean.
+        Includes root redirect to the HLS playlist for easier access.
         """
+        @app.route('/')
+        def root_redirect():
+            # Redirect root URL to the HLS playlist for convenience
+            return redirect('/stream/playlist.m3u8')
+            
         @app.route('/stream/<path:filename>')
         def serve_hls(filename):
             # Serve the requested HLS stream file
@@ -79,7 +98,7 @@ class StreamQueueProcessor:
         """
         Start the stream processor, including the Flask server and processing threads.
         This method initializes three daemon threads:
-        1. Flask server for HLS streaming (now with HTTPS support)
+        1. Flask server for HLS streaming (with HTTPS support)
         2. Queue processor for handling Trello cards
         3. Cleanup thread for managing storage
         """
@@ -87,8 +106,7 @@ class StreamQueueProcessor:
             self.is_running = True
             
             # Start Flask server thread
-            # DigitalOcean App Platform handles SSL termination, so we don't need
-            # to configure SSL certificates directly in the application
+            # DigitalOcean App Platform handles SSL termination
             self.logger.info(f"Starting Flask server on port {self.config.stream_port}...")
             self.server_thread = Thread(
                 target=lambda: app.run(
