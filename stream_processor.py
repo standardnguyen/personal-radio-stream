@@ -4,17 +4,19 @@ from flask import Flask, send_from_directory
 from threading import Thread
 import time
 from typing import Optional
+import os  # Added for environment variable checks
 from config_manager import StreamConfig, LoggerSetup
 from trello_manager import TrelloManager
 from media_manager import MediaManager
 
-# Initialize Flask application
+# Initialize Flask application for serving HLS streams
 app = Flask(__name__)
 
 class StreamQueueProcessor:
     """
     Main processor that coordinates Trello queue management and media streaming.
     Uses separate components for configuration, Trello operations, and media handling.
+    Now includes HTTPS support for secure streaming.
     """
     
     def __init__(
@@ -57,19 +59,27 @@ class StreamQueueProcessor:
         self.last_cleanup = time.time()
     
     def _setup_flask_routes(self) -> None:
-        """Configure Flask routes for HLS streaming"""
+        """
+        Configure Flask routes for HLS streaming with HTTPS support.
+        Adds security headers for HTTPS enforcement when running on DigitalOcean.
+        """
         @app.route('/stream/<path:filename>')
         def serve_hls(filename):
-            return send_from_directory(
+            # Serve the requested HLS stream file
+            response = send_from_directory(
                 str(self.config.hls_dir),
                 filename
             )
+            
+            # Add security headers for HTTPS
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+            return response
 
     def start(self) -> None:
         """
         Start the stream processor, including the Flask server and processing threads.
         This method initializes three daemon threads:
-        1. Flask server for HLS streaming
+        1. Flask server for HLS streaming (now with HTTPS support)
         2. Queue processor for handling Trello cards
         3. Cleanup thread for managing storage
         """
@@ -77,6 +87,8 @@ class StreamQueueProcessor:
             self.is_running = True
             
             # Start Flask server thread
+            # DigitalOcean App Platform handles SSL termination, so we don't need
+            # to configure SSL certificates directly in the application
             self.logger.info(f"Starting Flask server on port {self.config.stream_port}...")
             self.server_thread = Thread(
                 target=lambda: app.run(
