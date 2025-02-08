@@ -20,22 +20,16 @@ RUN pip install --no-cache-dir -r requirements.txt flask
 # Copy application code
 COPY . .
 
-# Add executable permissions to entrypoint script
-RUN chmod +x docker-entrypoint.sh
-
 # Create media and HLS directories
 RUN mkdir -p downloaded_media hls_segments
 
-# Instead of creating a new user, adjust file permissions
-# This ensures the directories are accessible but avoids user creation complexity
-RUN chmod -R 755 /app /downloaded_media /hls_segments
+# Create a non-root user
+RUN useradd -m streamuser && \
+    chown -R streamuser:streamuser /app
 
-# Optional: If you still want to run as a non-root user
-# Uncomment the following lines if the previous approach fails
-# RUN useradd -m -s /bin/bash streamuser
-# RUN chown -R streamuser:streamuser /app /downloaded_media /hls_segments
-# USER streamuser
+# Switch to non-root user
+USER streamuser
 
 # Use the entrypoint script
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["python", "start_stream.py"]
