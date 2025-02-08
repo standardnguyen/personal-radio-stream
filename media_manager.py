@@ -5,7 +5,7 @@ import subprocess
 import requests
 import magic
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 from config_manager import StreamConfig
 import logging
 import shutil
@@ -18,7 +18,7 @@ class MediaManager:
     
     This implementation includes optimized streaming configurations for stable playback
     across different clients (especially VLC), efficient media cleanup, and robust
-    error handling.
+    error handling with specific improvements for MP3 handling.
     """
     
     # Define supported media formats with their MIME types
@@ -28,7 +28,7 @@ class MediaManager:
             'video/webm', 'video/quicktime', 'video/x-flv'
         ],
         'audio': [
-            'audio/mpeg', 'audio/wav',  'audio/x-wav', 'audio/aac', 'audio/ogg',
+            'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/aac', 'audio/ogg',
             'audio/flac', 'audio/x-m4a', 'audio/mp4'
         ]
     }
@@ -44,9 +44,25 @@ class MediaManager:
             'audio_rate': '44100'
         },
         'audio': {
-            'codec': 'aac',
-            'bitrate': '192k',
-            'sample_rate': '44100'
+            'mp3': {  # Specific settings for MP3 files
+                'input_flags': [
+                    '-analyzeduration', '10M',  # Increased analysis time for complex MP3s
+                    '-probesize', '10M'         # Increased probe size for VBR files
+                ],
+                'output_flags': [
+                    '-c:a', 'aac',              # Convert to AAC for HLS
+                    '-b:a', '192k',             # Higher bitrate for quality
+                    '-ar', '44100',             # Standard sample rate
+                    '-af', 'aresample=async=1000', # Handle async audio
+                    '-ac', '2',                 # Ensure stereo output
+                    '-map', '0:a'               # Explicitly map audio stream
+                ]
+            },
+            'default': {  # Default settings for other audio formats
+                'codec': 'aac',
+                'bitrate': '192k',
+                'sample_rate': '44100'
+            }
         }
     }
     
@@ -78,13 +94,33 @@ class MediaManager:
     
     def _verify_ffmpeg_installation(self) -> None:
         """
-        Verify that FFmpeg is installed and accessible
+        Verify that FFmpeg is installed and accessible with proper codecs
         
         Raises:
             RuntimeError: If FFmpeg is not found or not executable
         """
         try:
-            subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
+            # Check FFmpeg version and available codecs
+            result = subprocess.run(
+                ['ffmpeg', '-version'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            self.logger.info(f"FFmpeg version: {result.stdout.split('\\n')[0]}")
+            
+            # Verify codec support
+            codecs = subprocess.run(
+                ['ffmpeg', '-codecs'],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            required_codecs = ['aac', 'libx264']
+            for codec in required_codecs:
+                if codec not in codecs.stdout:
+                    self.logger.warning(f"Required codec {codec} may not be available")
+                    
         except (subprocess.SubprocessError, FileNotFoundError) as e:
             raise RuntimeError("FFmpeg is not installed or not accessible") from e
     
@@ -114,6 +150,65 @@ class MediaManager:
             bool: True if the format is supported, False otherwise
         """
         return self._get_media_type(mime_type) is not None
+    
+    def _validate_audio_file(self, file_path: str, mime_type: str) -> Tuple[bool, str]:
+        """
+        Validate audio file using FFprobe, with specific checks for MP3s
+        
+        Args:
+            file_path: Path to the audio file
+            mime_type: MIME type of the file
+            
+        Returns:
+            Tuple[bool, str]: (is_valid, error_message)
+        """
+        try:
+            # Use FFprobe to analyze the file
+            probe_command = [
+                'ffprobe',
+                '-v', 'error',
+                '-select_streams', 'a:0',  # Select first audio stream
+                '-show_entries', 'stream=codec_name,channels,sample_rate',
+                '-of', 'json',
+                file_path
+            ]
+            
+            result = subprocess.run(
+                probe_command,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            if "stream" not in result.stdout:
+                return False, "No audio stream found in file"
+            
+            # Additional checks for MP3 files
+            if mime_type == 'audio/mpeg':
+                # Check for common MP3 corruption indicators
+                check_command = [
+                    'ffmpeg',
+                    '-v', 'error',
+                    '-i', file_path,
+                    '-f', 'null',
+                    '-'
+                ]
+                check_result = subprocess.run(
+                    check_command,
+                    capture_output=True,
+                    text=True
+                )
+                
+                if check_result.stderr:
+                    if "Invalid data found when processing input" in check_result.stderr:
+                        return False, "MP3 file appears to be corrupted"
+                        
+            return True, "Audio file validated successfully"
+            
+        except subprocess.CalledProcessError as e:
+            return False, f"FFprobe validation failed: {e.stderr}"
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
     
     def download_attachment(self, attachment) -> Optional[Path]:
         """
@@ -160,6 +255,15 @@ class MediaManager:
                 file_path.unlink()
                 return None
             
+            # Additional validation for audio files
+            media_type = self._get_media_type(mime_type)
+            if media_type == 'audio':
+                is_valid, error_message = self._validate_audio_file(str(file_path), mime_type)
+                if not is_valid:
+                    self.logger.error(f"Audio validation failed: {error_message}")
+                    file_path.unlink()
+                    return None
+            
             self.logger.info(f"Successfully downloaded and validated: {file_path}")
             return file_path
             
@@ -181,6 +285,7 @@ class MediaManager:
         - Optimized encoding settings for real-time streaming
         - Separate handling for video and audio content
         - Improved error handling and cleanup
+        - Special handling for MP3 files
         
         Args:
             media_path: Path to the media file to stream
@@ -205,11 +310,11 @@ class MediaManager:
             # Build FFmpeg command with optimized settings
             command = ['ffmpeg', '-y']  # Overwrite output files
             
-            # Input settings
-            command.extend([
-                '-re',                # Read input at native framerate
-                '-i', str(media_path)
-            ])
+            # Input settings with special handling for MP3
+            if media_type == 'audio' and mime_type == 'audio/mpeg':
+                command.extend(self.FFMPEG_PRESETS['audio']['mp3']['input_flags'])
+            
+            command.extend(['-i', str(media_path)])
             
             # Media-specific encoding settings
             if media_type == 'video':
@@ -231,12 +336,17 @@ class MediaManager:
                     '-ar', preset['audio_rate'],
                 ])
             else:  # audio
-                preset = self.FFMPEG_PRESETS['audio']
-                command.extend([
-                    '-c:a', preset['codec'],
-                    '-b:a', preset['bitrate'],
-                    '-ar', preset['sample_rate']
-                ])
+                if mime_type == 'audio/mpeg':
+                    # Special handling for MP3 files
+                    command.extend(self.FFMPEG_PRESETS['audio']['mp3']['output_flags'])
+                else:
+                    # Default audio settings for other formats
+                    preset = self.FFMPEG_PRESETS['audio']['default']
+                    command.extend([
+                        '-c:a', preset['codec'],
+                        '-b:a', preset['bitrate'],
+                        '-ar', preset['sample_rate']
+                    ])
             
             # HLS specific settings for continuous playback
             command.extend([
@@ -278,90 +388,4 @@ class MediaManager:
             elif wait_for_completion:
                 self.current_process.wait()
             
-        except Exception as e:
-            self.logger.error(f"Error streaming media: {str(e)}")
-            self.stop_stream()
-    
-    def _monitor_stream_process(self, process: subprocess.Popen) -> None:
-        """
-        Monitor the FFmpeg process for errors and log them
-        
-        Args:
-            process: The FFmpeg subprocess to monitor
-        """
-        try:
-            stderr = process.stderr
-            while process.poll() is None and stderr:
-                line = stderr.readline().decode().strip()
-                if line and ('error' in line.lower() or 'failed' in line.lower()):
-                    self.logger.error(f"FFmpeg error: {line}")
-        except Exception as e:
-            self.logger.error(f"Error monitoring stream process: {str(e)}")
-    
-    def stop_stream(self) -> None:
-        """
-        Stop the current stream if one is running and clean up resources
-        """
-        if self.current_process:
-            try:
-                self.current_process.terminate()
-                self.current_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.current_process.kill()
-            finally:
-                self.current_process = None
-                self.current_media = None
-            
-            self.logger.info("Stream stopped")
-            
-            # Clean up HLS segments
-            try:
-                for file in self.hls_dir.glob("*.ts"):
-                    file.unlink()
-            except Exception as e:
-                self.logger.error(f"Error cleaning up HLS segments: {str(e)}")
-    
-    def cleanup_media(self) -> None:
-        """
-        Remove old media files to maintain storage limits.
-        Implements a more sophisticated cleanup strategy:
-        - Deletes oldest files first when storage limit is exceeded
-        - Keeps track of recently played files
-        - Ensures cleanup doesn't affect currently playing media
-        """
-        try:
-            total_size = 0
-            files: List[tuple[Path, int]] = []
-            
-            # Calculate total size and gather file info
-            for file in self.config.media_dir.glob("*"):
-                if file.is_file():
-                    size = file.stat().st_size
-                    files.append((file, size))
-                    total_size += size
-            
-            # Sort files by modification time (oldest first)
-            files.sort(key=lambda x: x[0].stat().st_mtime)
-            
-            # Remove oldest files until under storage limit
-            while total_size > self.config.max_storage and files:
-                file, size = files.pop(0)
-                
-                # Skip currently playing file
-                if self.current_media and file.samefile(self.current_media):
-                    continue
-                
-                try:
-                    file.unlink()
-                    total_size -= size
-                    self.logger.info(f"Cleaned up: {file.name}")
-                except Exception as e:
-                    self.logger.error(f"Error deleting {file}: {str(e)}")
-            
-            # Log storage status
-            self.logger.info(f"Storage usage after cleanup: {total_size / 1024 / 1024:.1f}MB")
-                    
-        except Exception as e:
-            self.logger.error(f"Error during cleanup: {str(e)}")
-
-from threading import Thread
+        except Exception as e
