@@ -12,4 +12,16 @@ services:
       - TZ=America/Denver
       - TRELLO_API_KEY=${TRELLO_API_KEY}
       - TRELLO_TOKEN=${TRELLO_TOKEN}
-      - TRELLO_BOARD_NAME=🧱 Radio
+      - TRELLO_BOARD_NAME= Radio
+    # Add this command to check environment variables before starting
+    command: >
+      sh -c "
+        echo 'Environment variables:' &&
+        echo TRELLO_API_KEY=$${TRELLO_API_KEY} &&
+        echo TRELLO_TOKEN=$${TRELLO_TOKEN} &&
+        echo TRELLO_BOARD_NAME=$${TRELLO_BOARD_NAME} &&
+        echo 'Generated config.ini:' &&
+        envsubst < config.template.ini > config.ini &&
+        cat config.ini &&
+        python start_stream.py
+      "
