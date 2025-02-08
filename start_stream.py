@@ -14,7 +14,7 @@ processor = StreamQueueProcessor(
     media_dir=config['Storage'].get('media_dir', 'downloaded_media'),
     cleanup_interval_hours=int(config['Storage'].get('cleanup_hours', '24')),
     max_storage_mb=int(config['Storage'].get('max_storage_mb', '5000')),
-    stream_url=config['Stream'].get('url', 'rtsp://0.0.0.0:8554/live')
+    stream_port=int(config['Stream'].get('port', '8080'))  # Now using HTTP port instead of RTSP URL
 )
 
 try:
@@ -26,6 +26,7 @@ try:
     print("1. Add a card to the 'Queue' list in your Trello board")
     print("2. Attach a media file to the card")
     print("3. (Optional) Add duration in seconds in the card description")
+    print(f"\nStream will be available at: http://localhost:{config['Stream'].get('port', '8080')}/stream/playlist.m3u8")
     
     while True:
         input()  # Keep the script running until Ctrl+C
