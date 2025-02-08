@@ -1,3 +1,5 @@
+# media_manager.py
+
 import time
 import subprocess
 import requests
@@ -7,6 +9,7 @@ from typing import Optional, Dict, List
 from config_manager import StreamConfig
 import logging
 import shutil
+from threading import Thread
 
 class MediaManager:
     """
@@ -169,7 +172,7 @@ class MediaManager:
             self.logger.error(f"Error downloading attachment: {str(e)}")
             return None
     
-    def stream_media(self, media_path: Path, duration: Optional[int] = None) -> None:
+    def stream_media(self, media_path: Path, duration: Optional[int] = None, wait_for_completion: bool = True) -> None:
         """
         Stream media file using FFmpeg with optimized HLS settings for stable playback.
         
@@ -182,6 +185,7 @@ class MediaManager:
         Args:
             media_path: Path to the media file to stream
             duration: Optional duration in seconds to stream
+            wait_for_completion: Whether to wait for the current file to finish
         """
         try:
             # Stop any existing stream
@@ -234,12 +238,12 @@ class MediaManager:
                     '-ar', preset['sample_rate']
                 ])
             
-            # HLS specific settings
+            # HLS specific settings for continuous playback
             command.extend([
                 '-f', 'hls',
                 '-hls_time', '6',             # Segment duration
                 '-hls_list_size', '15',       # Number of segments in playlist
-                '-hls_flags', 'delete_segments+independent_segments',
+                '-hls_flags', 'delete_segments+independent_segments+append_list',
                 '-hls_segment_type', 'mpegts',
                 '-hls_init_time', '4',
                 '-hls_playlist_type', 'event',
@@ -267,13 +271,13 @@ class MediaManager:
             )
             error_thread.start()
             
-            # Handle stream duration
+            # Handle stream duration and completion
             if duration:
                 time.sleep(duration)
                 self.stop_stream()
-            else:
+            elif wait_for_completion:
                 self.current_process.wait()
-                
+            
         except Exception as e:
             self.logger.error(f"Error streaming media: {str(e)}")
             self.stop_stream()
