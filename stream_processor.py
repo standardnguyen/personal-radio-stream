@@ -1,33 +1,22 @@
-import os
-import time
-import subprocess
-import requests
-import magic
-import logging
-from pathlib import Path
-from trello import TrelloClient
-from threading import Thread
-from typing import Optional, Tuple
-from flask import Flask, send_from_directory
+# stream_processor.py
 
-# Initialize Flask application for serving HLS streams
+from flask import Flask, send_from_directory
+from threading import Thread
+import time
+from typing import Optional
+from config_manager import StreamConfig, LoggerSetup
+from trello_manager import TrelloManager
+from media_manager import MediaManager
+
+# Initialize Flask application
 app = Flask(__name__)
 
 class StreamQueueProcessor:
     """
-    A processor that manages a queue of media files using Trello as a frontend.
-    It downloads media from Trello cards, converts them to HLS format, and streams
-    them in sequence while managing storage and cleanup.
+    Main processor that coordinates Trello queue management and media streaming.
+    Uses separate components for configuration, Trello operations, and media handling.
     """
     
-    # Define supported media formats for validation
-    SUPPORTED_FORMATS = {
-        'video': ['video/mp4', 'video/mpeg', 'video/avi', 'video/x-matroska', 
-                 'video/webm', 'video/quicktime', 'video/x-flv'],
-        'audio': ['audio/mpeg', 'audio/wav', 'audio/aac', 'audio/ogg', 
-                 'audio/flac', 'audio/x-m4a']
-    }
-
     def __init__(
         self,
         trello_api_key: str,
@@ -40,113 +29,180 @@ class StreamQueueProcessor:
         stream_port: int = 8080,
         log_file: str = "stream_processor.log"
     ):
-        """
-        Initialize the StreamQueueProcessor with configuration parameters.
-        """
-        # Set up logging configuration with both file and console handlers
-        self.logger = logging.getLogger('StreamProcessor')
-        self.logger.setLevel(logging.INFO)
+        """Initialize the stream processor with all required components"""
+        # Create configuration
+        self.config = StreamConfig(
+            trello_api_key=trello_api_key,
+            trello_token=trello_token,
+            board_name=board_name,
+            list_name=list_name,
+            media_dir=media_dir,
+            cleanup_interval_hours=cleanup_interval_hours,
+            max_storage_mb=max_storage_mb,
+            stream_port=stream_port,
+            log_file=log_file
+        )
         
-        # File handler
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        self.logger.addHandler(file_handler)
+        # Set up logging
+        self.logger = LoggerSetup.setup_logger('StreamProcessor', log_file)
         
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        self.logger.addHandler(console_handler)
-
-        # Log initialization parameters (safely)
-        self.logger.info("Initializing StreamQueueProcessor")
-        self.logger.info(f"Board Name: {board_name}")
-        self.logger.info(f"List Name: {list_name}")
-        self.logger.info(f"Media Directory: {media_dir}")
-        self.logger.info(f"Stream Port: {stream_port}")
-        self.logger.info(f"API Key Length: {len(trello_api_key) if trello_api_key else 'None'}")
-        self.logger.info(f"Token Length: {len(trello_token) if trello_token else 'None'}")
-
-        try:
-            # Initialize Trello client
-            self.logger.info("Creating Trello client...")
-            self.client = TrelloClient(api_key=trello_api_key, token=trello_token)
-            
-            # Store configuration
-            self.board_name = board_name
-            self.list_name = list_name
-            self._initialize_trello()
-
-            # Configure storage settings
-            self.media_dir = Path(media_dir)
-            self.media_dir.mkdir(exist_ok=True)
-            self.cleanup_interval = cleanup_interval_hours * 3600
-            self.max_storage = max_storage_mb * 1024 * 1024
-            self.last_cleanup = time.time()
-
-            # Set up streaming configuration
-            self.stream_port = stream_port
-            self.hls_dir = Path("hls_segments")
-            self.hls_dir.mkdir(exist_ok=True)
-            self.current_process: Optional[subprocess.Popen] = None
-            self.is_running = False
-
-        except Exception as e:
-            self.logger.error(f"Error during initialization: {str(e)}")
-            raise
-
-        # Configure Flask routes for HLS streaming
+        # Initialize components
+        self.trello = TrelloManager(self.config, self.logger)
+        self.media = MediaManager(self.config, self.logger)
+        
+        # Set up Flask route
+        self._setup_flask_routes()
+        
+        self.is_running = False
+        self.last_cleanup = time.time()
+    
+    def _setup_flask_routes(self) -> None:
+        """Configure Flask routes for HLS streaming"""
         @app.route('/stream/<path:filename>')
         def serve_hls(filename):
-            return send_from_directory(str(self.hls_dir), filename)
+            return send_from_directory(
+                str(self.config.hls_dir),
+                filename
+            )
 
-    def _initialize_trello(self):
+    def start(self) -> None:
         """
-        Initialize Trello board and create required lists if they don't exist.
+        Start the stream processor, including the Flask server and processing threads.
+        This method initializes three daemon threads:
+        1. Flask server for HLS streaming
+        2. Queue processor for handling Trello cards
+        3. Cleanup thread for managing storage
         """
         try:
-            # Test API connection first
-            self.logger.info("Testing Trello API connection...")
-            boards = list(self.client.list_boards())
-            board_names = [board.name for board in boards]
-            self.logger.info(f"Successfully connected to Trello. Found {len(boards)} boards:")
-            self.logger.info(f"Available boards: {', '.join(board_names)}")
+            self.is_running = True
             
-            # Find the specified board
-            self.logger.info(f"Looking for board: '{self.board_name}'")
-            matching_boards = [b for b in boards if b.name == self.board_name]
+            # Start Flask server thread
+            self.logger.info(f"Starting Flask server on port {self.config.stream_port}...")
+            self.server_thread = Thread(
+                target=lambda: app.run(
+                    host='0.0.0.0',
+                    port=self.config.stream_port,
+                    debug=False,
+                    use_reloader=False
+                )
+            )
+            self.server_thread.daemon = True
+            self.server_thread.start()
             
-            if not matching_boards:
-                error_msg = f"Board '{self.board_name}' not found. Available boards: {', '.join(board_names)}"
-                self.logger.error(error_msg)
-                raise ValueError(error_msg)
-                
-            self.board = matching_boards[0]
-            self.logger.info(f"Found board: {self.board.name} (ID: {self.board.id})")
+            # Start queue processing thread
+            self.logger.info("Starting queue processing thread...")
+            self.process_thread = Thread(target=self._process_queue)
+            self.process_thread.daemon = True
+            self.process_thread.start()
             
-            # Define and create required lists
-            list_names = ['Queue', 'Now Playing', 'Played']
-            self.lists = {}
-            
-            existing_lists = {lst.name: lst for lst in self.board.list_lists()}
-            self.logger.info(f"Found existing lists: {', '.join(existing_lists.keys())}")
-            
-            for name in list_names:
-                if name in existing_lists:
-                    self.lists[name] = existing_lists[name]
-                    self.logger.info(f"Using existing list: {name}")
-                else:
-                    self.lists[name] = self.board.add_list(name)
-                    self.logger.info(f"Created new list: {name}")
-            
-            self.logger.info("Trello initialization completed successfully")
+            # Start cleanup thread
+            self.logger.info("Starting cleanup thread...")
+            self.cleanup_thread = Thread(target=self._cleanup_routine)
+            self.cleanup_thread.daemon = True
+            self.cleanup_thread.start()
             
         except Exception as e:
-            self.logger.error(f"Failed to initialize Trello: {str(e)}")
-            self.logger.error(f"Error type: {type(e).__name__}")
-            if hasattr(e, 'response'):
-                self.logger.error(f"Response status: {getattr(e.response, 'status_code', 'N/A')}")
-                self.logger.error(f"Response text: {getattr(e.response, 'text', 'N/A')}")
+            self.logger.error(f"Error starting processor: {str(e)}")
+            self.stop()
             raise
 
-    # Rest of the StreamQueueProcessor class remains the same...
-    # [Previous methods for streaming, processing cards, etc. stay unchanged]
+    def stop(self) -> None:
+        """
+        Stop the stream processor and clean up resources.
+        This includes stopping the current stream and cleaning up HLS segments.
+        """
+        self.logger.info("Stopping stream processor...")
+        self.is_running = False
+        
+        # Stop current stream
+        self.media.stop_stream()
+        
+        # Clean up HLS segments
+        self.logger.info("Cleaning up HLS segments...")
+        for file in self.config.hls_dir.glob("*"):
+            try:
+                file.unlink()
+            except Exception as e:
+                self.logger.error(f"Error deleting {file}: {str(e)}")
+
+    def _process_queue(self) -> None:
+        """
+        Main queue processing loop that continuously checks for new cards
+        and processes them. This method runs in its own thread and handles
+        the movement of cards through different Trello lists.
+        """
+        while self.is_running:
+            try:
+                # Get cards from Queue list
+                queue_cards = self.trello.get_queue_cards()
+                
+                if queue_cards:
+                    card = queue_cards[0]  # Get the first card
+                    self.logger.info(f"Processing card: {card.name}")
+                    
+                    # Move card to Now Playing
+                    self.trello.move_card_to_list(card, 'Now Playing')
+                    
+                    # Process the card
+                    self._process_card(card)
+                    
+                    # Move card to Played list
+                    self.trello.move_card_to_list(card, 'Played')
+                
+                # Check if cleanup is needed
+                if time.time() - self.last_cleanup > self.config.cleanup_interval:
+                    self._cleanup_routine()
+                
+                time.sleep(5)  # Prevent excessive API calls
+                
+            except Exception as e:
+                self.logger.error(f"Error in queue processing: {str(e)}")
+                time.sleep(30)  # Wait longer on error
+
+    def _process_card(self, card) -> None:
+        """
+        Process a single card from the queue by downloading and streaming its media.
+        
+        Args:
+            card: A Trello card object containing media attachments
+        """
+        try:
+            # Get media attachment
+            attachments = self.trello.get_card_attachments(card)
+            if not attachments:
+                self.logger.warning(f"No attachments found on card: {card.name}")
+                return
+            
+            # Download and validate the first attachment
+            attachment = attachments[0]
+            media_path = self.media.download_attachment(attachment)
+            
+            if not media_path:
+                self.logger.error(f"Failed to download attachment from card: {card.name}")
+                return
+            
+            # Get duration from card description if available
+            try:
+                duration = int(card.description) if card.description.strip().isdigit() else None
+            except (AttributeError, ValueError):
+                duration = None
+            
+            # Stream the media
+            self.media.stream_media(media_path, duration)
+            
+        except Exception as e:
+            self.logger.error(f"Error processing card {card.name}: {str(e)}")
+
+    def _cleanup_routine(self) -> None:
+        """
+        Periodic cleanup handler that manages storage and old files.
+        This method is called automatically when the cleanup interval is reached.
+        """
+        try:
+            self.logger.info("Starting cleanup routine...")
+            self.media.cleanup_media()
+            self.last_cleanup = time.time()
+            self.logger.info("Cleanup completed")
+            
+        except Exception as e:
+            self.logger.error(f"Error during cleanup: {str(e)}")

@@ -1,23 +1,21 @@
+# start_stream.py
+
 from stream_processor import StreamQueueProcessor
 import configparser
 import logging
 import sys
 import os
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('startup.log')
-    ]
-)
-
-logger = logging.getLogger(__name__)
-
 def load_config():
-    """Load and validate configuration from config.ini"""
+    """
+    Load and validate configuration from config.ini
+    
+    Returns:
+        configparser.ConfigParser: Parsed configuration object
+        
+    Raises:
+        ValueError: If required sections are missing
+    """
     try:
         logger.info("Loading configuration...")
         
@@ -25,21 +23,11 @@ def load_config():
         config = configparser.ConfigParser()
         config.read('config.ini')
         
-        # Log configuration sections
-        logger.info(f"Found config sections: {config.sections()}")
-        
         # Validate required sections
         required_sections = ['Trello', 'Storage', 'Stream']
         for section in required_sections:
             if section not in config:
                 raise ValueError(f"Missing required section '{section}' in config.ini")
-        
-        # Log Trello configuration (safely)
-        logger.info("Trello configuration:")
-        logger.info(f"Board Name: {config['Trello']['board_name']}")
-        logger.info(f"List Name: {config['Trello']['list_name']}")
-        logger.info(f"API Key Length: {len(config['Trello']['api_key'])}")
-        logger.info(f"Token Length: {len(config['Trello']['token'])}")
         
         return config
         
@@ -48,7 +36,23 @@ def load_config():
         raise
 
 def main():
+    """
+    Main entry point for the stream processor application.
+    Handles configuration loading, processor initialization, and shutdown.
+    """
     try:
+        # Set up logging
+        global logger
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.StreamHandler(sys.stdout),
+                logging.FileHandler('startup.log')
+            ]
+        )
+        logger = logging.getLogger(__name__)
+        
         # Load configuration
         config = load_config()
         
@@ -65,18 +69,21 @@ def main():
             stream_port=int(config['Stream'].get('port', '8080'))
         )
         
+        # Start the processor
         logger.info("Starting stream processor...")
         processor.start()
         
+        # Display usage information
         logger.info("\nProcessor is running! Press Ctrl+C to stop.")
-        logger.info("To use:")
+        logger.info("\nTo use:")
         logger.info("1. Add a card to the 'Queue' list in your Trello board")
         logger.info("2. Attach a media file to the card")
         logger.info("3. (Optional) Add duration in seconds in the card description")
         logger.info(f"\nStream will be available at: http://localhost:{config['Stream'].get('port', '8080')}/stream/playlist.m3u8")
         
+        # Keep the script running
         while True:
-            input()  # Keep the script running until Ctrl+C
+            input()
             
     except KeyboardInterrupt:
         logger.info("\nStopping stream processor...")
