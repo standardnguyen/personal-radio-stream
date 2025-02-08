@@ -20,6 +20,13 @@ RUN pip install --no-cache-dir -r requirements.txt flask
 # Copy application code
 COPY . .
 
+# Ensure script has Unix-style line endings and is executable
+RUN apt-get update && apt-get install -y dos2unix && \
+    dos2unix docker-entrypoint.sh && \
+    chmod +x docker-entrypoint.sh && \
+    apt-get remove -y dos2unix && \
+    rm -rf /var/lib/apt/lists/*
+
 # Create media and HLS directories
 RUN mkdir -p downloaded_media hls_segments
 
@@ -30,6 +37,6 @@ RUN useradd -m streamuser && \
 # Switch to non-root user
 USER streamuser
 
-# Use the entrypoint script
-ENTRYPOINT ["docker-entrypoint.sh"]
+# Use the entrypoint script with full path
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["python", "start_stream.py"]
