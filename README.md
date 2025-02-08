@@ -143,4 +143,4 @@ For local development issues:
 
 ## License
 
-MIT License - See LICENSE file for details
+Standard's Petty License
