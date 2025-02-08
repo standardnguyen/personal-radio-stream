@@ -23,16 +23,18 @@ COPY . .
 # Add executable permissions to entrypoint script
 RUN chmod +x docker-entrypoint.sh
 
-# Create media and HLS directories with correct permissions
+# Create media and HLS directories
 RUN mkdir -p downloaded_media hls_segments
 
-# Create a non-root user with a more flexible approach
-RUN addgroup --system streamuser && \
-    adduser --system --ingroup streamuser streamuser && \
-    chown -R streamuser:streamuser /app /downloaded_media /hls_segments
+# Instead of creating a new user, adjust file permissions
+# This ensures the directories are accessible but avoids user creation complexity
+RUN chmod -R 755 /app /downloaded_media /hls_segments
 
-# Switch to non-root user
-USER streamuser
+# Optional: If you still want to run as a non-root user
+# Uncomment the following lines if the previous approach fails
+# RUN useradd -m -s /bin/bash streamuser
+# RUN chown -R streamuser:streamuser /app /downloaded_media /hls_segments
+# USER streamuser
 
 # Use the entrypoint script
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
