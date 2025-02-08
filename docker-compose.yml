@@ -9,7 +9,7 @@ services:
       - "8080:8080"
     restart: unless-stopped
     environment:
-      - TZ=UTC
+      - TZ=America/Denver
       - TRELLO_API_KEY=${TRELLO_API_KEY}
       - TRELLO_TOKEN=${TRELLO_TOKEN}
       - TRELLO_BOARD_NAME=🧱 Radio
