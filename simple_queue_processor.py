@@ -50,43 +50,45 @@ class SimpleQueueProcessor:
             self.process_thread.join(timeout=5)
 
     def _process_queue(self) -> None:
-        """Main processing loop - play what's in the Queue list and keep cards there"""
+        """Main processing loop - cycle through all cards in the Queue list."""
         while self.is_running:
             try:
-                # Get all cards in Queue
+                # Retrieve all cards in the Queue list
                 queue_cards = self.trello.get_queue_cards()
 
-                # Process next card if we have one
                 if queue_cards:
-                    card = queue_cards[0]  # Get first card
+                    # Loop through each card in the queue
+                    for card in queue_cards:
+                        attachments = self.trello.get_card_attachments(card)
+                        if attachments:
+                            # Download and validate the first attachment
+                            media_path = self.media.download_attachment(attachments[0])
+                            if media_path:
+                                # Try to get an optional duration from the card description
+                                try:
+                                    duration = int(card.description.strip()) if card.description and card.description.strip().isdigit() else None
+                                except (AttributeError, ValueError):
+                                    duration = None
 
-                    # Get and validate attachment
-                    attachments = self.trello.get_card_attachments(card)
-                    if attachments:
-                        # Download and process attachment
-                        media_path = self.media.download_attachment(attachments[0])
-                        if media_path:
-                            # Get optional duration
-                            try:
-                                duration = int(card.description) if card.description.strip().isdigit() else None
-                            except (AttributeError, ValueError):
-                                duration = None
+                                self.logger.info(f"Playing: {card.name}")
+                                self.media.stream_media(media_path, duration)
+                                self.logger.info(f"Finished playing: {card.name}")
+                            else:
+                                self.logger.warning(f"Failed to download media for card: {card.name}")
+                        else:
+                            self.logger.warning(f"No attachments found on card: {card.name}")
 
-                            # Play the media and wait for completion
-                            self.logger.info(f"Playing: {card.name}")
-                            self.media.stream_media(media_path, duration)
+                        # (Optional) Add a short delay between processing individual cards
+                        time.sleep(1)
+                else:
+                    self.logger.info("No cards in queue")
 
-                            # After playing, log completion but don't archive
-                            self.logger.info(f"Finished playing: {card.name}")
-                    else:
-                        self.logger.warning(f"No attachments found on card: {card.name}")
-
-                # Run cleanup if needed
+                # Run cleanup if needed based on the configured cleanup interval
                 if time.time() - self.last_cleanup > self.cleanup_interval:
                     self.media.cleanup_media()
                     self.last_cleanup = time.time()
 
-                # Short sleep to prevent busy waiting
+                # Sleep a bit before checking the queue again
                 time.sleep(1)
 
             except Exception as e:
