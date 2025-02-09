@@ -54,7 +54,7 @@ class StreamQueueProcessor:
             # Initialize core components
             self.trello = TrelloManager(self.config, self.logger)
             self.media = MediaManager(self.config, self.logger)
-            self.server = StreamServer(self.config.hls_dir)
+            self.server = StreamServer(self.config.hls_dir, self.logger)
 
             # Initialize simplified queue processor
             self.queue_processor = SimpleQueueProcessor(
@@ -65,7 +65,7 @@ class StreamQueueProcessor:
             )
 
             # Create player page
-            PlayerTemplate.create_player_page(self.config.hls_dir)
+            PlayerTemplate.create_player_page(self.config.hls_dir, self.logger)
 
             # Initialize thread tracking
             self.server_thread: Optional[Thread] = None

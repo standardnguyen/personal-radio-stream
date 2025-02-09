@@ -1,11 +1,15 @@
 # player_template.py
 
 from pathlib import Path
+import logging
 
 class PlayerTemplate:
-    """Manages the HTML5 player template for HLS streaming"""
-    
-    # HTML template for the web player with HLS.js
+    """
+    Manages the HTML5 player template for HLS streaming with enhanced error handling
+    and debugging capabilities.
+    """
+
+    # HTML template for the web player with advanced HLS.js configuration
     TEMPLATE = '''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -19,6 +23,7 @@ class PlayerTemplate:
             padding: 20px;
             font-family: system-ui, -apple-system, sans-serif;
             background: #f5f5f5;
+            color: #333;
         }
         .container {
             max-width: 800px;
@@ -31,6 +36,7 @@ class PlayerTemplate:
         .player-wrapper {
             width: 100%;
             margin: 20px 0;
+            position: relative;
         }
         #videoPlayer {
             width: 100%;
@@ -48,6 +54,34 @@ class PlayerTemplate:
             background: #ffebee;
             color: #c62828;
         }
+        .warning {
+            background: #fff3e0;
+            color: #ef6c00;
+        }
+        .debug-panel {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            display: none;
+        }
+        .debug-panel.show {
+            display: block;
+        }
+        #debugLog {
+            max-height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        .debug-line {
+            margin: 2px 0;
+            padding: 2px 4px;
+        }
+        .debug-line.error { color: #c62828; }
+        .debug-line.warning { color: #ef6c00; }
+        .debug-line.info { color: #1565c0; }
     </style>
 </head>
 <body>
@@ -56,55 +90,158 @@ class PlayerTemplate:
         <div class="player-wrapper">
             <video id="videoPlayer" controls></video>
         </div>
-        <div id="status" class="status">Connecting to stream...</div>
+        <div id="status" class="status">Initializing player...</div>
+
+        <div class="debug-panel" id="debugPanel">
+            <h3>Debug Information</h3>
+            <div>
+                <strong>HLS.js Version:</strong> <span id="hlsVersion"></span>
+            </div>
+            <div>
+                <strong>Stream URL:</strong> <span id="streamUrl"></span>
+            </div>
+            <div>
+                <strong>Player State:</strong> <span id="playerState">Initializing</span>
+            </div>
+            <div id="debugLog"></div>
+        </div>
     </div>
 
     <script>
         const video = document.getElementById('videoPlayer');
         const status = document.getElementById('status');
+        const debugPanel = document.getElementById('debugPanel');
+        const debugLog = document.getElementById('debugLog');
         const streamUrl = '/stream/playlist.m3u8';
+
+        // Debug logging function
+        function log(level, message) {
+            const line = document.createElement('div');
+            line.className = `debug-line ${level}`;
+            line.textContent = `${new Date().toISOString().split('T')[1]} [${level}] ${message}`;
+            debugLog.appendChild(line);
+            debugLog.scrollTop = debugLog.scrollHeight;
+
+            // Also log to console
+            console.log(`[${level}] ${message}`);
+        }
+
+        // Show technical information for debugging
+        document.getElementById('hlsVersion').textContent = Hls.version;
+        document.getElementById('streamUrl').textContent = streamUrl;
+
+        // Enable debug panel with keyboard shortcut (Ctrl+D)
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'd') {
+                debugPanel.classList.toggle('show');
+            }
+        });
 
         function initPlayer() {
             if (Hls.isSupported()) {
                 const hls = new Hls({
-                    debug: false,
+                    debug: true,
                     enableWorker: true,
                     lowLatencyMode: true,
-                    backBufferLength: 90
+                    backBufferLength: 90,
+                    maxBufferLength: 30,
+                    maxMaxBufferLength: 600,
+                    maxBufferSize: 60 * 1000 * 1000,
+                    maxBufferHole: 0.5,
+                    manifestLoadingTimeOut: 10000,
+                    manifestLoadingMaxRetry: 4,
+                    levelLoadingTimeOut: 10000,
+                    levelLoadingMaxRetry: 4,
+                    fragLoadingTimeOut: 20000,
+                    fragLoadingMaxRetry: 6
                 });
-                
-                hls.loadSource(streamUrl);
-                hls.attachMedia(video);
-                
+
+                // Attach debug events
                 hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    log('info', 'Manifest parsed successfully');
                     status.textContent = 'Stream ready - Playing...';
+                    document.getElementById('playerState').textContent = 'Playing';
                     video.play().catch(e => {
                         status.textContent = 'Click play to start streaming';
+                        log('warning', `Autoplay failed: ${e.message}`);
                     });
                 });
 
                 hls.on(Hls.Events.ERROR, (event, data) => {
                     if (data.fatal) {
+                        log('error', `Fatal error: ${data.type} - ${data.details}`);
                         status.className = 'status error';
-                        status.textContent = 'Stream error - Reconnecting...';
-                        setTimeout(() => hls.loadSource(streamUrl), 2000);
+                        status.textContent = 'Stream error - Attempting to recover...';
+                        document.getElementById('playerState').textContent = 'Error';
+
+                        switch (data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                log('info', 'Attempting to recover from network error');
+                                hls.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                log('info', 'Attempting to recover from media error');
+                                hls.recoverMediaError();
+                                break;
+                            default:
+                                log('error', 'Unrecoverable error - Reloading player');
+                                initPlayer();
+                                break;
+                        }
+                    } else {
+                        log('warning', `Non-fatal error: ${data.type} - ${data.details}`);
                     }
                 });
+
+                // Monitor buffer state
+                setInterval(() => {
+                    const buffered = video.buffered;
+                    if (buffered.length > 0) {
+                        const bufferedEnd = buffered.end(buffered.length - 1);
+                        const duration = video.duration;
+                        if (duration > 0) {
+                            const bufferedPercent = (bufferedEnd / duration * 100).toFixed(1);
+                            log('info', `Buffer: ${bufferedPercent}% (${bufferedEnd.toFixed(1)}s / ${duration.toFixed(1)}s)`);
+                        }
+                    }
+                }, 5000);
+
+                hls.loadSource(streamUrl);
+                hls.attachMedia(video);
+                log('info', 'HLS player initialized');
             }
             else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                log('info', 'Using native HLS playback');
                 video.src = streamUrl;
                 video.addEventListener('loadedmetadata', () => {
                     status.textContent = 'Stream ready - Playing...';
+                    document.getElementById('playerState').textContent = 'Playing';
                     video.play().catch(e => {
                         status.textContent = 'Click play to start streaming';
+                        log('warning', `Autoplay failed: ${e.message}`);
                     });
+                });
+
+                video.addEventListener('error', (e) => {
+                    const error = video.error;
+                    log('error', `Playback error: ${error.message}`);
+                    status.className = 'status error';
+                    status.textContent = 'Playback error - Please try refreshing';
+                    document.getElementById('playerState').textContent = 'Error';
                 });
             }
             else {
+                log('error', 'HLS playback not supported');
                 status.className = 'status error';
                 status.textContent = 'Your browser does not support HLS playback';
+                document.getElementById('playerState').textContent = 'Unsupported';
             }
         }
+
+        // Initialize player and log any uncaught errors
+        window.addEventListener('error', (e) => {
+            log('error', `Uncaught error: ${e.message}`);
+        });
 
         initPlayer();
     </script>
@@ -112,13 +249,23 @@ class PlayerTemplate:
 </html>'''
 
     @classmethod
-    def create_player_page(cls, hls_dir: Path) -> None:
+    def create_player_page(cls, hls_dir: Path, logger: logging.Logger) -> None:
         """
-        Create the HTML5 player page with HLS.js support
-        
+        Create the HTML5 player page with HLS.js support and debugging capabilities
+
         Args:
             hls_dir: Directory where the player.html should be created
+            logger: Logger instance for debugging
         """
-        player_path = hls_dir / 'player.html'
-        with open(player_path, 'w') as f:
-            f.write(cls.TEMPLATE)
+        try:
+            player_path = hls_dir / 'player.html'
+            logger.info(f"Creating player page at: {player_path}")
+
+            with open(player_path, 'w') as f:
+                f.write(cls.TEMPLATE)
+
+            logger.info("Player page created successfully")
+
+        except Exception as e:
+            logger.error(f"Error creating player page: {str(e)}")
+            raise
