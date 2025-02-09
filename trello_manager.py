@@ -1,21 +1,17 @@
 # trello_manager.py
 
 import logging
-from typing import Dict, List, Optional
+from typing import List, Optional
 from trello import TrelloClient, Board, List as TrelloList
 from config_manager import StreamConfig
 
 class TrelloManager:
-    """Manages all Trello-related operations for the stream processor"""
-    
+    """
+    Simplified Trello manager that works with just the Queue list
+    """
+
     def __init__(self, config: StreamConfig, logger: logging.Logger):
-        """
-        Initialize the Trello manager with configuration
-        
-        Args:
-            config: StreamConfig instance containing Trello credentials
-            logger: Configured logger instance
-        """
+        """Initialize the Trello manager"""
         self.config = config
         self.logger = logger
         self.client = TrelloClient(
@@ -23,81 +19,47 @@ class TrelloManager:
             token=config.trello_token
         )
         self.board: Optional[Board] = None
-        self.lists: Dict[str, TrelloList] = {}
-        
-        # Initialize Trello board and lists
+        self.queue_list: Optional[TrelloList] = None
+
+        # Initialize Trello board and queue list
         self._initialize_trello()
-    
+
     def _initialize_trello(self) -> None:
-        """
-        Initialize Trello board and create required lists if they don't exist
-        
-        Raises:
-            ValueError: If the specified board is not found
-        """
+        """Initialize Trello board and find the Queue list"""
         try:
-            # Test API connection
+            # Test API connection and find board
             boards = list(self.client.list_boards())
-            board_names = [board.name for board in boards]
-            self.logger.info(f"Connected to Trello. Found {len(boards)} boards")
-            
-            # Find specified board
             matching_boards = [b for b in boards if b.name == self.config.board_name]
+
             if not matching_boards:
                 raise ValueError(
                     f"Board '{self.config.board_name}' not found. "
-                    f"Available boards: {', '.join(board_names)}"
+                    f"Available boards: {', '.join(b.name for b in boards)}"
                 )
-            
+
             self.board = matching_boards[0]
-            self.logger.info(f"Found board: {self.board.name} (ID: {self.board.id})")
-            
-            # Set up required lists
-            self._setup_lists()
-            
+            self.logger.info(f"Found board: {self.board.name}")
+
+            # Find Queue list
+            lists = self.board.list_lists()
+            queue_lists = [lst for lst in lists if lst.name == self.config.list_name]
+
+            if not queue_lists:
+                # Create Queue list if it doesn't exist
+                self.queue_list = self.board.add_list(self.config.list_name)
+                self.logger.info(f"Created new Queue list")
+            else:
+                self.queue_list = queue_lists[0]
+                self.logger.info(f"Found existing Queue list")
+
         except Exception as e:
             self.logger.error(f"Failed to initialize Trello: {str(e)}")
             raise
-    
-    def _setup_lists(self) -> None:
-        """Create or find required Trello lists"""
-        list_names = ['Queue', 'Now Playing', 'Played']
-        existing_lists = {lst.name: lst for lst in self.board.list_lists()}
-        
-        for name in list_names:
-            if name in existing_lists:
-                self.lists[name] = existing_lists[name]
-                self.logger.info(f"Using existing list: {name}")
-            else:
-                self.lists[name] = self.board.add_list(name)
-                self.logger.info(f"Created new list: {name}")
-    
+
     def get_queue_cards(self) -> List:
-        """Return all cards in the Queue list"""
-        return self.lists['Queue'].list_cards()
-    
-    def move_card_to_list(self, card, list_name: str) -> None:
-        """
-        Move a card to the specified list
-        
-        Args:
-            card: Trello card object
-            list_name: Name of the destination list
-        """
-        if list_name in self.lists:
-            card.change_list(self.lists[list_name].id)
-            self.logger.info(f"Moved card '{card.name}' to '{list_name}'")
-        else:
-            self.logger.error(f"List '{list_name}' not found")
-    
+        """Get all cards in the Queue list"""
+        return self.queue_list.list_cards()
+
     def get_card_attachments(self, card) -> List:
-        """
-        Get all attachments for a card
-        
-        Args:
-            card: Trello card object
-            
-        Returns:
-            List of attachment objects
-        """
+        """Get all attachments for a card"""
         return card.get_attachments()
