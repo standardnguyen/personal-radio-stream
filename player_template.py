@@ -5,11 +5,11 @@ import logging
 
 class PlayerTemplate:
     """
-    Manages the HTML5 player template for HLS streaming with enhanced error handling
-    and debugging capabilities.
+    Manages the HTML5 player template for HLS streaming with enhanced error handling,
+    debugging capabilities, and automatic reloading for continuous playback.
     """
 
-    # HTML template for the web player with advanced HLS.js configuration
+    # HTML template for the web player with HLS.js configuration and auto-reload functionality
     TEMPLATE = '''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -91,22 +91,14 @@ class PlayerTemplate:
             <video id="videoPlayer" controls></video>
         </div>
         <div id="status" class="status">Initializing player...</div>
-
         <div class="debug-panel" id="debugPanel">
             <h3>Debug Information</h3>
-            <div>
-                <strong>HLS.js Version:</strong> <span id="hlsVersion"></span>
-            </div>
-            <div>
-                <strong>Stream URL:</strong> <span id="streamUrl"></span>
-            </div>
-            <div>
-                <strong>Player State:</strong> <span id="playerState">Initializing</span>
-            </div>
+            <div><strong>HLS.js Version:</strong> <span id="hlsVersion"></span></div>
+            <div><strong>Stream URL:</strong> <span id="streamUrl"></span></div>
+            <div><strong>Player State:</strong> <span id="playerState">Initializing</span></div>
             <div id="debugLog"></div>
         </div>
     </div>
-
     <script>
         const video = document.getElementById('videoPlayer');
         const status = document.getElementById('status');
@@ -121,16 +113,14 @@ class PlayerTemplate:
             line.textContent = `${new Date().toISOString().split('T')[1]} [${level}] ${message}`;
             debugLog.appendChild(line);
             debugLog.scrollTop = debugLog.scrollHeight;
-
-            // Also log to console
             console.log(`[${level}] ${message}`);
         }
 
-        // Show technical information for debugging
+        // Display HLS.js version and stream URL in the debug panel
         document.getElementById('hlsVersion').textContent = Hls.version;
         document.getElementById('streamUrl').textContent = streamUrl;
 
-        // Enable debug panel with keyboard shortcut (Ctrl+D)
+        // Enable toggling of the debug panel with Ctrl+D
         document.addEventListener('keydown', (e) => {
             if (e.ctrlKey && e.key === 'd') {
                 debugPanel.classList.toggle('show');
@@ -156,7 +146,7 @@ class PlayerTemplate:
                     fragLoadingMaxRetry: 6
                 });
 
-                // Attach debug events
+                // When the manifest is parsed, start playback
                 hls.on(Hls.Events.MANIFEST_PARSED, () => {
                     log('info', 'Manifest parsed successfully');
                     status.textContent = 'Stream ready - Playing...';
@@ -167,14 +157,14 @@ class PlayerTemplate:
                     });
                 });
 
+                // Error handling with auto-reload for fatal errors
                 hls.on(Hls.Events.ERROR, (event, data) => {
-                    if (data.fatal) {
+                    if(data.fatal) {
                         log('error', `Fatal error: ${data.type} - ${data.details}`);
                         status.className = 'status error';
                         status.textContent = 'Stream error - Attempting to recover...';
                         document.getElementById('playerState').textContent = 'Error';
-
-                        switch (data.type) {
+                        switch(data.type) {
                             case Hls.ErrorTypes.NETWORK_ERROR:
                                 log('info', 'Attempting to recover from network error');
                                 hls.startLoad();
@@ -184,8 +174,8 @@ class PlayerTemplate:
                                 hls.recoverMediaError();
                                 break;
                             default:
-                                log('error', 'Unrecoverable error - Reloading player');
-                                initPlayer();
+                                log('error', 'Unrecoverable error - Reloading stream');
+                                reloadStream(hls);
                                 break;
                         }
                     } else {
@@ -193,18 +183,23 @@ class PlayerTemplate:
                     }
                 });
 
-                // Monitor buffer state
-                setInterval(() => {
-                    const buffered = video.buffered;
-                    if (buffered.length > 0) {
-                        const bufferedEnd = buffered.end(buffered.length - 1);
-                        const duration = video.duration;
-                        if (duration > 0) {
-                            const bufferedPercent = (bufferedEnd / duration * 100).toFixed(1);
-                            log('info', `Buffer: ${bufferedPercent}% (${bufferedEnd.toFixed(1)}s / ${duration.toFixed(1)}s)`);
-                        }
-                    }
-                }, 5000);
+                // If playback ends, reload the stream
+                video.addEventListener('ended', () => {
+                    log('info', 'Playback ended, reloading stream');
+                    reloadStream(hls);
+                });
+
+                // Function to reload the stream by detaching and reattaching the source
+                function reloadStream(hlsInstance) {
+                    hlsInstance.detachMedia();
+                    video.pause();
+                    video.src = "";
+                    setTimeout(() => {
+                        hlsInstance.loadSource(streamUrl);
+                        hlsInstance.attachMedia(video);
+                        video.play().catch(e => log('warning', `Autoplay failed: ${e.message}`));
+                    }, 1000); // Delay to allow the backend to generate new segments
+                }
 
                 hls.loadSource(streamUrl);
                 hls.attachMedia(video);
@@ -221,7 +216,6 @@ class PlayerTemplate:
                         log('warning', `Autoplay failed: ${e.message}`);
                     });
                 });
-
                 video.addEventListener('error', (e) => {
                     const error = video.error;
                     log('error', `Playback error: ${error.message}`);
@@ -238,7 +232,7 @@ class PlayerTemplate:
             }
         }
 
-        // Initialize player and log any uncaught errors
+        // Log any uncaught errors
         window.addEventListener('error', (e) => {
             log('error', `Uncaught error: ${e.message}`);
         });
@@ -251,11 +245,11 @@ class PlayerTemplate:
     @classmethod
     def create_player_page(cls, hls_dir: Path, logger: logging.Logger) -> None:
         """
-        Create the HTML5 player page with HLS.js support and debugging capabilities
+        Create the HTML5 player page with HLS.js support and debugging capabilities.
 
         Args:
-            hls_dir: Directory where the player.html should be created
-            logger: Logger instance for debugging
+            hls_dir: Directory where the player.html file will be created.
+            logger: Logger instance for logging debug/info messages.
         """
         try:
             player_path = hls_dir / 'player.html'
@@ -265,7 +259,6 @@ class PlayerTemplate:
                 f.write(cls.TEMPLATE)
 
             logger.info("Player page created successfully")
-
         except Exception as e:
             logger.error(f"Error creating player page: {str(e)}")
             raise
