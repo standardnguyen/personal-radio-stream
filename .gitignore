@@ -12,6 +12,7 @@ venv.bak/
 
 # Downloaded media
 downloaded_media/
+hls_segments/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

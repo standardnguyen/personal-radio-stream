@@ -12,7 +12,7 @@ services:
       - TZ=America/Denver
       - TRELLO_API_KEY=${TRELLO_API_KEY}
       - TRELLO_TOKEN=${TRELLO_TOKEN}
-      - TRELLO_BOARD_NAME= Radio
+      - TRELLO_BOARD_NAME=🧱 Radio
     # Add this command to check environment variables before starting
     command: >
       sh -c "
