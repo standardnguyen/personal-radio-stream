@@ -23,45 +23,38 @@ class StreamConfig:
         # Convert string paths to Path objects
         if isinstance(self.media_dir, str):
             self.media_dir = Path(self.media_dir)
-        
+
         # Create necessary directories
         self.media_dir.mkdir(exist_ok=True)
         self.hls_dir = Path("hls_segments")
         self.hls_dir.mkdir(exist_ok=True)
-        
+
         # Convert time and storage limits to base units
         self.cleanup_interval = self.cleanup_interval_hours * 3600
         self.max_storage = self.max_storage_mb * 1024 * 1024
 
 class LoggerSetup:
-    """Handles logging configuration for the application"""
-    
+    _loggers = {}  # Cache to store existing loggers
+
     @staticmethod
     def setup_logger(name: str, log_file: str) -> logging.Logger:
-        """
-        Configure and return a logger with both file and console handlers
-        
-        Args:
-            name: Name for the logger
-            log_file: Path to the log file
-            
-        Returns:
-            Configured logger instance
-        """
+        if name in LoggerSetup._loggers:
+            return LoggerSetup._loggers[name]
+
         logger = logging.getLogger(name)
-        logger.setLevel(logging.INFO)
-        
-        # Create formatters and handlers
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        
-        # File handler
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-        
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
-        
+        logger.propagate = False  # Prevent propagation to root logger
+
+        if not logger.handlers:  # Only add handlers if none exist
+            logger.setLevel(logging.INFO)
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
+
+        LoggerSetup._loggers[name] = logger
         return logger
