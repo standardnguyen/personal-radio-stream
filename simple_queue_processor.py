@@ -8,8 +8,8 @@ from typing import Optional
 
 class SimpleQueueProcessor:
     """
-    A simplified queue processor that just plays cards from the Queue list.
-    No card movement, no state tracking, just plays media files in order.
+    A simplified queue processor that plays cards from the Queue list.
+    Cards remain in the Queue list after playing, allowing for repeated playback.
     """
 
     def __init__(
@@ -50,7 +50,7 @@ class SimpleQueueProcessor:
             self.process_thread.join(timeout=5)
 
     def _process_queue(self) -> None:
-        """Main processing loop - just play what's in the Queue list"""
+        """Main processing loop - play what's in the Queue list and keep cards there"""
         while self.is_running:
             try:
                 # Get all cards in Queue
@@ -76,11 +76,10 @@ class SimpleQueueProcessor:
                             self.logger.info(f"Playing: {card.name}")
                             self.media.stream_media(media_path, duration)
 
-                            # Archive the card when done (optional)
-                            card.set_closed(True)
+                            # After playing, log completion but don't archive
+                            self.logger.info(f"Finished playing: {card.name}")
                     else:
                         self.logger.warning(f"No attachments found on card: {card.name}")
-                        card.set_closed(True)  # Archive cards with no attachments
 
                 # Run cleanup if needed
                 if time.time() - self.last_cleanup > self.cleanup_interval:
