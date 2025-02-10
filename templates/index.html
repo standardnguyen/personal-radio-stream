@@ -55,6 +55,7 @@
                 fetch('/api/playlist')
                     .then(res => res.json())
                     .then(data => {
+                        // Extend each track with additional properties for state management
                         setQueue(data.map(item => ({
                             ...item,
                             isLoaded: false,
@@ -64,8 +65,9 @@
                     .catch(console.error);
             }, []);
 
+            // Revised loadFile: returns the blob URL immediately after loading.
             const loadFile = async (track, index) => {
-                if (loadedFiles.has(track.id)) return;
+                if (loadedFiles.has(track.id)) return track.blob;
                 
                 try {
                     const response = await fetch(`/media/${track.filename}`);
@@ -76,25 +78,34 @@
                         i === index ? { ...t, blob: url, isLoaded: true } : t
                     ));
                     setLoadedFiles(prev => new Set([...prev, track.id]));
+                    return url;
                 } catch (error) {
                     console.error('Error loading file:', error);
+                    return null;
                 }
             };
 
+            // Revised playTrack: uses the blob URL returned from loadFile.
             const playTrack = async (track, index) => {
+                let blobUrl = track.blob;
                 if (!track.isLoaded) {
-                    await loadFile(track, index);
+                    blobUrl = await loadFile(track, index);
                 }
                 
-                audioRef.current.src = track.blob;
-                audioRef.current.play();
-                setCurrentTrack(index);
-                setIsPlaying(true);
+                if (blobUrl) {
+                    audioRef.current.src = blobUrl;
+                    audioRef.current.play();
+                    setCurrentTrack(index);
+                    setIsPlaying(true);
+                } else {
+                    console.error('No blob URL available to play');
+                }
             };
 
             const startPlaylist = async () => {
                 if (queue.length === 0) return;
                 
+                // Pre-load the first two tracks (if available)
                 if (!queue[0].isLoaded) await loadFile(queue[0], 0);
                 if (queue[1] && !queue[1].isLoaded) await loadFile(queue[1], 1);
                 

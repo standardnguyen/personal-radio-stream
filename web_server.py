@@ -52,16 +52,11 @@ class StreamServer:
         def serve_media(filename):
             try:
                 filename = filename.replace('+', ' ')
-                file_path = self.media_dir / filename
-                self.logger.info(f"Attempting to serve: {file_path}")
-                self.logger.info(f"File exists: {file_path.exists()}")
-                if not file_path.exists():
-                    return "File not found", 404
-                
-                return send_file(str(file_path))
+                return send_from_directory(self.media_dir, filename)
             except Exception as e:
                 self.logger.error(f"Error serving {filename}: {str(e)}")
                 return "Error serving file", 500
+
 
         @self.app.errorhandler(404)
         def not_found_error(error):
