@@ -1,193 +1,233 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Simple Player</title>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/lucide.min.js"></script>
+  <title>Simple Player</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.1/lucide.min.js"></script>
+  <style>
+    /* Styling for the progress bar */
+    .progress-container {
+      background: #e0e0e0;
+      height: 4px;
+      width: 100%;
+      border-radius: 2px;
+      margin-top: 4px;
+      overflow: hidden;
+    }
+    .progress-bar {
+      background: #3b82f6; /* blue-500 */
+      height: 100%;
+      transition: width 0.25s linear;
+    }
+  </style>
 </head>
 <body>
-    <div id="root"></div>
-    <script type="text/babel">
-        const Button = React.forwardRef(({ className, children, variant = "default", size = "default", ...props }, ref) => {
-            const baseStyles = "inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-950 disabled:pointer-events-none disabled:opacity-50";
-            const variants = {
-                default: "bg-gray-900 text-gray-50 shadow hover:bg-gray-900/90",
-                secondary: "bg-gray-100 text-gray-900 shadow-sm hover:bg-gray-100/80",
-                ghost: "hover:bg-gray-100 hover:text-gray-900"
-            };
-            const sizes = {
-                default: "h-9 px-4 py-2",
-                sm: "h-8 px-3 text-xs",
-                lg: "h-10 px-8",
-                icon: "h-9 w-9"
-            };
-            
-            return (
-                <button
-                    className={`${baseStyles} ${variants[variant]} ${sizes[size]} ${className}`}
-                    ref={ref}
-                    {...props}
-                >
-                    {children}
-                </button>
-            );
-        });
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
 
-        const Card = React.forwardRef(({ className, ...props }, ref) => (
-            <div
-                ref={ref}
-                className={`rounded-xl border border-gray-200 bg-white text-gray-950 shadow ${className}`}
-                {...props}
-            />
-        ));
+    const Button = React.forwardRef(({ className, children, variant = "default", size = "default", ...props }, ref) => {
+      const baseStyles = "inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-950 disabled:pointer-events-none disabled:opacity-50";
+      const variants = {
+        default: "bg-gray-900 text-gray-50 shadow hover:bg-gray-900/90",
+        secondary: "bg-gray-100 text-gray-900 shadow-sm hover:bg-gray-100/80",
+        ghost: "hover:bg-gray-100 hover:text-gray-900"
+      };
+      const sizes = {
+        default: "h-9 px-4 py-2",
+        sm: "h-8 px-3 text-xs",
+        lg: "h-10 px-8",
+        icon: "h-9 w-9"
+      };
+      
+      return (
+        <button
+          className={`${baseStyles} ${variants[variant]} ${sizes[size]} ${className}`}
+          ref={ref}
+          {...props}
+        >
+          {children}
+        </button>
+      );
+    });
 
-        function SimplePlayer() {
-            const [queue, setQueue] = useState([]);
-            const [currentTrack, setCurrentTrack] = useState(null);
-            const [isPlaying, setIsPlaying] = useState(false);
-            const [loadedFiles, setLoadedFiles] = useState(new Set());
-            const audioRef = useRef(new Audio());
+    const Card = React.forwardRef(({ className, ...props }, ref) => (
+      <div
+        ref={ref}
+        className={`rounded-xl border border-gray-200 bg-white text-gray-950 shadow ${className}`}
+        {...props}
+      />
+    ));
 
-            useEffect(() => {
-                fetch('/api/playlist')
-                    .then(res => res.json())
-                    .then(data => {
-                        // Extend each track with additional properties for state management
-                        setQueue(data.map(item => ({
-                            ...item,
-                            isLoaded: false,
-                            blob: null
-                        })));
-                    })
-                    .catch(console.error);
-            }, []);
+    function SimplePlayer() {
+      const [queue, setQueue] = useState([]);
+      const [currentTrack, setCurrentTrack] = useState(null);
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [loadedFiles, setLoadedFiles] = useState(new Set());
+      const [progress, setProgress] = useState(0);
+      const audioRef = useRef(new Audio());
 
-            // Revised loadFile: returns the blob URL immediately after loading.
-            const loadFile = async (track, index) => {
-                if (loadedFiles.has(track.id)) return track.blob;
-                
-                try {
-                    const response = await fetch(`/media/${track.filename}`);
-                    const blob = await response.blob();
-                    const url = URL.createObjectURL(blob);
-                    
-                    setQueue(prev => prev.map((t, i) => 
-                        i === index ? { ...t, blob: url, isLoaded: true } : t
-                    ));
-                    setLoadedFiles(prev => new Set([...prev, track.id]));
-                    return url;
-                } catch (error) {
-                    console.error('Error loading file:', error);
-                    return null;
-                }
-            };
+      // Fetch the playlist on mount.
+      useEffect(() => {
+        fetch('/api/playlist')
+          .then(res => res.json())
+          .then(data => {
+            setQueue(data.map(item => ({
+              ...item,
+              isLoaded: false,
+              blob: null
+            })));
+          })
+          .catch(console.error);
+      }, []);
 
-            // Revised playTrack: uses the blob URL returned from loadFile.
-            const playTrack = async (track, index) => {
-                let blobUrl = track.blob;
-                if (!track.isLoaded) {
-                    blobUrl = await loadFile(track, index);
-                }
-                
-                if (blobUrl) {
-                    audioRef.current.src = blobUrl;
-                    audioRef.current.play();
-                    setCurrentTrack(index);
-                    setIsPlaying(true);
-                } else {
-                    console.error('No blob URL available to play');
-                }
-            };
+      // Update progress as the audio plays.
+      useEffect(() => {
+        const audio = audioRef.current;
+        const updateProgress = () => {
+          if (audio.duration) {
+            setProgress((audio.currentTime / audio.duration) * 100);
+          }
+        };
+        audio.addEventListener('timeupdate', updateProgress);
+        return () => audio.removeEventListener('timeupdate', updateProgress);
+      }, []);
 
-            const startPlaylist = async () => {
-                if (queue.length === 0) return;
-                
-                // Pre-load the first two tracks (if available)
-                if (!queue[0].isLoaded) await loadFile(queue[0], 0);
-                if (queue[1] && !queue[1].isLoaded) await loadFile(queue[1], 1);
-                
-                playTrack(queue[0], 0);
-            };
-
-            const deleteTrack = (index) => {
-                if (queue[index].blob) {
-                    URL.revokeObjectURL(queue[index].blob);
-                }
-                setQueue(prev => prev.filter((_, i) => i !== index));
-                setLoadedFiles(prev => {
-                    const newSet = new Set(prev);
-                    newSet.delete(queue[index].id);
-                    return newSet;
-                });
-            };
-
-            useEffect(() => {
-                const audio = audioRef.current;
-                
-                const handleEnded = () => {
-                    if (currentTrack < queue.length - 1) {
-                        const nextIndex = currentTrack + 1;
-                        playTrack(queue[nextIndex], nextIndex);
-                        
-                        if (nextIndex + 1 < queue.length) {
-                            loadFile(queue[nextIndex + 1], nextIndex + 1);
-                        }
-                    }
-                };
-
-                audio.addEventListener('ended', handleEnded);
-                return () => audio.removeEventListener('ended', handleEnded);
-            }, [currentTrack, queue]);
-
-            return (
-                <Card className="p-6 w-full max-w-2xl mx-auto mt-8">
-                    <div className="mb-4">
-                        <Button 
-                            className="w-full mb-4" 
-                            onClick={startPlaylist}
-                            disabled={queue.length === 0}
-                        >
-                            Start Playlist
-                        </Button>
-                    </div>
-                    
-                    <div className="space-y-2">
-                        {queue.map((track, index) => (
-                            <div key={track.id} className="flex items-center justify-between p-2 bg-gray-100 rounded">
-                                <div className="flex-1">{track.name}</div>
-                                <div className="flex gap-2">
-                                    <Button
-                                        variant={currentTrack === index && isPlaying ? "secondary" : "default"}
-                                        onClick={() => playTrack(track, index)}
-                                        disabled={!track.isLoaded && loadedFiles.size >= 2}
-                                    >
-                                        {currentTrack === index && isPlaying ? 'Playing' : 'Play'}
-                                    </Button>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        onClick={() => deleteTrack(index)}
-                                        disabled={currentTrack === index}
-                                    >
-                                        <i data-lucide="trash-2" className="w-4 h-4"></i>
-                                    </Button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                </Card>
-            );
+      // Function to load a track file and return its blob URL.
+      const loadFile = async (track, index) => {
+        if (loadedFiles.has(track.id)) return track.blob;
+        try {
+          const response = await fetch(`/media/${track.filename}`);
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          setQueue(prev => prev.map((t, i) =>
+            i === index ? { ...t, blob: url, isLoaded: true } : t
+          ));
+          setLoadedFiles(prev => new Set([...prev, track.id]));
+          return url;
+        } catch (error) {
+          console.error('Error loading file:', error);
+          return null;
         }
+      };
 
-        const { useState, useEffect, useRef } = React;
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<SimplePlayer />);
+      // Play the specified track.
+      const playTrack = async (track, index) => {
+        let blobUrl = track.blob;
+        if (!track.isLoaded) {
+          blobUrl = await loadFile(track, index);
+        }
+        if (blobUrl) {
+          audioRef.current.src = blobUrl;
+          audioRef.current.play();
+          setCurrentTrack(index);
+          setIsPlaying(true);
+        } else {
+          console.error('No blob URL available to play');
+        }
+      };
 
-        // Initialize Lucide icons
-        lucide.createIcons();
-    </script>
+      // Pause the currently playing track.
+      const pauseTrack = () => {
+        audioRef.current.pause();
+        setIsPlaying(false);
+      };
+
+      // Start the playlist and pre-load the first two tracks.
+      const startPlaylist = async () => {
+        if (queue.length === 0) return;
+        if (!queue[0].isLoaded) await loadFile(queue[0], 0);
+        if (queue[1] && !queue[1].isLoaded) await loadFile(queue[1], 1);
+        playTrack(queue[0], 0);
+      };
+
+      const deleteTrack = (index) => {
+        if (queue[index].blob) {
+          URL.revokeObjectURL(queue[index].blob);
+        }
+        setQueue(prev => prev.filter((_, i) => i !== index));
+        setLoadedFiles(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(queue[index].id);
+          return newSet;
+        });
+      };
+
+      // Advance to the next track when the current track ends.
+      useEffect(() => {
+        const audio = audioRef.current;
+        const handleEnded = () => {
+          if (currentTrack < queue.length - 1) {
+            const nextIndex = currentTrack + 1;
+            playTrack(queue[nextIndex], nextIndex);
+            if (nextIndex + 1 < queue.length) {
+              loadFile(queue[nextIndex + 1], nextIndex + 1);
+            }
+          }
+        };
+        audio.addEventListener('ended', handleEnded);
+        return () => audio.removeEventListener('ended', handleEnded);
+      }, [currentTrack, queue]);
+
+      return (
+        <Card className="p-6 w-full max-w-2xl mx-auto mt-8">
+          <div className="mb-4">
+            <Button
+              className="w-full mb-4"
+              onClick={startPlaylist}
+              disabled={queue.length === 0}
+            >
+              Start Playlist
+            </Button>
+          </div>
+          <div className="space-y-2">
+            {queue.map((track, index) => (
+              <div key={track.id} className="flex flex-col bg-gray-100 rounded p-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">{track.name}</div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant={currentTrack === index && isPlaying ? "secondary" : "default"}
+                      onClick={() => playTrack(track, index)}
+                      disabled={!track.isLoaded && loadedFiles.size >= 2}
+                    >
+                      {currentTrack === index && isPlaying ? 'Playing' : 'Play'}
+                    </Button>
+                    {/* Show the Pause button for the currently playing track */}
+                    {currentTrack === index && isPlaying && (
+                      <Button variant="default" onClick={pauseTrack}>
+                        Pause
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => deleteTrack(index)}
+                      disabled={currentTrack === index}
+                    >
+                      <i data-lucide="trash-2" className="w-4 h-4"></i>
+                    </Button>
+                  </div>
+                </div>
+                {/* Display the progress bar only for the currently playing track */}
+                {currentTrack === index && (
+                  <div className="progress-container">
+                    <div className="progress-bar" style={{ width: `${progress}%` }}></div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<SimplePlayer />);
+    lucide.createIcons();
+  </script>
 </body>
 </html>
