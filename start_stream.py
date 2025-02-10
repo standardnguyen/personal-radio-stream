@@ -1,106 +1,35 @@
-from stream_processor import StreamQueueProcessor
-import configparser
-import logging
 import sys
 import os
-import signal
-import time
-
-def load_config():
-    """
-    Load and validate configuration from config.ini
-    
-    Returns:
-        configparser.ConfigParser: Parsed configuration object
-        
-    Raises:
-        ValueError: If required sections are missing
-    """
-    try:
-        logger.info("Loading configuration...")
-        
-        # Load configuration file
-        config = configparser.ConfigParser()
-        config.read('config.ini')
-        
-        # Validate required sections
-        required_sections = ['Trello', 'Storage', 'Stream']
-        for section in required_sections:
-            if section not in config:
-                raise ValueError(f"Missing required section '{section}' in config.ini")
-        
-        return config
-        
-    except Exception as e:
-        logger.error(f"Error loading configuration: {str(e)}")
-        raise
-
-def signal_handler(signum, frame):
-    """Handle shutdown signals gracefully"""
-    logger.info(f"\nReceived signal {signum}. Shutting down...")
-    if 'processor' in globals():
-        processor.stop()
-    sys.exit(0)
+import configparser
+import logging
+from pathlib import Path
+from web_server import StreamServer
+from trello_manager import TrelloManager
+from config_manager import StreamConfig, LoggerSetup
 
 def main():
-    """
-    Main entry point for the stream processor application.
-    Handles configuration loading, processor initialization, and shutdown.
-    """
+    # Set up logging
+    logger = LoggerSetup.setup_logger('StreamProcessor', 'startup.log')
+    
     try:
-        # Set up logging
-        global logger
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.StreamHandler(sys.stdout),
-                logging.FileHandler('startup.log')
-            ]
-        )
-        logger = logging.getLogger(__name__)
-        
-        # Register signal handlers
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
-        
-        # Load configuration
-        config = load_config()
-        
-        # Initialize the processor
-        global processor
-        logger.info("Initializing StreamQueueProcessor...")
-        processor = StreamQueueProcessor(
-            trello_api_key=config['Trello']['api_key'],
-            trello_token=config['Trello']['token'],
-            board_name=config['Trello']['board_name'],
-            list_name=config['Trello']['list_name'],
-            media_dir=config['Storage'].get('media_dir', 'downloaded_media'),
-            cleanup_interval_hours=int(config['Storage'].get('cleanup_hours', '24')),
-            max_storage_mb=int(config['Storage'].get('max_storage_mb', '5000')),
-            stream_port=int(config['Stream'].get('port', '8080'))
+        # Load configuration from environment variables
+        config = StreamConfig(
+            trello_api_key=os.getenv('TRELLO_API_KEY'),
+            trello_token=os.getenv('TRELLO_TOKEN'),
+            board_name=os.getenv('TRELLO_BOARD_NAME'),
+            list_name='Queue',
+            media_dir=Path('downloaded_media'),
+            cleanup_interval_hours=24,
+            max_storage_mb=5000,
+            stream_port=8080
         )
         
-        # Start the processor
-        logger.info("Starting stream processor...")
-        processor.start()
+        # Initialize Trello manager
+        trello = TrelloManager(config, logger)
         
-        # Display usage information
-        logger.info("\nProcessor is running! Use CTRL+C to stop.")
-        logger.info("\nTo use:")
-        logger.info("1. Add a card to the 'Queue' list in your Trello board")
-        logger.info("2. Attach a media file to the card")
-        logger.info("3. (Optional) Add duration in seconds in the card description")
-        logger.info(f"\nStream will be available at: http://localhost:{config['Stream'].get('port', '8080')}/stream/playlist.m3u8")
-        
-        # Keep the main thread alive without using input()
-        while True:
-            time.sleep(1)
-            
-    except KeyboardInterrupt:
-        logger.info("\nStopping stream processor...")
-        processor.stop()
-        logger.info("Processor stopped successfully.")
+        # Start web server
+        server = StreamServer(config.media_dir, logger, trello)
+        server.run(port=config.stream_port)
         
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
