@@ -70,7 +70,7 @@
       const [progress, setProgress] = useState(0);
       const audioRef = useRef(new Audio());
 
-      // Fetch the playlist on mount.
+      // Fetch the playlist on mount
       useEffect(() => {
         fetch('/api/playlist')
           .then(res => res.json())
@@ -84,7 +84,7 @@
           .catch(console.error);
       }, []);
 
-      // Update progress as the audio plays.
+      // Update progress as the audio plays
       useEffect(() => {
         const audio = audioRef.current;
         const updateProgress = () => {
@@ -96,7 +96,7 @@
         return () => audio.removeEventListener('timeupdate', updateProgress);
       }, []);
 
-      // Function to load a track file and return its blob URL.
+      // Load a track file and return its blob URL
       const loadFile = async (track, index) => {
         if (loadedFiles.has(track.id)) return track.blob;
         try {
@@ -114,7 +114,7 @@
         }
       };
 
-      // Play the specified track.
+      // Start playing a track from the beginning
       const playTrack = async (track, index) => {
         let blobUrl = track.blob;
         if (!track.isLoaded) {
@@ -125,18 +125,22 @@
           audioRef.current.play();
           setCurrentTrack(index);
           setIsPlaying(true);
-        } else {
-          console.error('No blob URL available to play');
         }
       };
 
-      // Pause the currently playing track.
+      // Resume playing from where it was paused
+      const resumeTrack = () => {
+        audioRef.current.play();
+        setIsPlaying(true);
+      };
+
+      // Pause the currently playing track
       const pauseTrack = () => {
         audioRef.current.pause();
         setIsPlaying(false);
       };
 
-      // Start the playlist and pre-load the first two tracks.
+      // Start the playlist and pre-load the first two tracks
       const startPlaylist = async () => {
         if (queue.length === 0) return;
         if (!queue[0].isLoaded) await loadFile(queue[0], 0);
@@ -156,7 +160,7 @@
         });
       };
 
-      // Advance to the next track when the current track ends.
+      // Advance to the next track when the current track ends
       useEffect(() => {
         const audio = audioRef.current;
         const handleEnded = () => {
@@ -189,17 +193,25 @@
                 <div className="flex items-center justify-between">
                   <div className="flex-1">{track.name}</div>
                   <div className="flex gap-2">
-                    <Button
-                      variant={currentTrack === index && isPlaying ? "secondary" : "default"}
-                      onClick={() => playTrack(track, index)}
-                      disabled={!track.isLoaded && loadedFiles.size >= 2}
-                    >
-                      {currentTrack === index && isPlaying ? 'Playing' : 'Play'}
-                    </Button>
-                    {/* Show the Pause button for the currently playing track */}
-                    {currentTrack === index && isPlaying && (
-                      <Button variant="default" onClick={pauseTrack}>
-                        Pause
+                    {currentTrack === index ? (
+                      // Show play/pause/resume for current track
+                      isPlaying ? (
+                        <Button variant="secondary" onClick={pauseTrack}>
+                          Pause
+                        </Button>
+                      ) : (
+                        <Button variant="default" onClick={resumeTrack}>
+                          Resume
+                        </Button>
+                      )
+                    ) : (
+                      // Show play button for other tracks
+                      <Button
+                        variant="default"
+                        onClick={() => playTrack(track, index)}
+                        disabled={!track.isLoaded && loadedFiles.size >= 2}
+                      >
+                        Play
                       </Button>
                     )}
                     <Button
