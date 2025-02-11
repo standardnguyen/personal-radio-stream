@@ -12,7 +12,7 @@ class StreamServer:
         self.trello = trello_manager
         # Initialize MediaManager if Trello is provided
         self.media_manager = MediaManager(trello_manager.config, logger) if trello_manager else None
-        
+
         # Use ProxyFix if behind a proxy
         self.app.wsgi_app = ProxyFix(
             self.app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1
@@ -30,57 +30,98 @@ class StreamServer:
         def get_playlist():
             """
             Build a playlist from Trello cards.
-            For the first two cards, pre-download the attachment;
-            for the remaining cards, just compute the safe filename without downloading.
+            Just compute filenames without downloading - files will be downloaded when requested.
             """
             if not self.trello:
                 return jsonify([])
-            
-            cards = self.trello.get_queue_cards()
-            playlist = []
-            for i, card in enumerate(cards):
-                attachments = card.get_attachments()
-                if attachments:
-                    att = attachments[0]
-                    # Compute a safe filename similar to the logic in download_attachment:
-                    safe_filename = "".join(x for x in Path(att.name).stem if x.isalnum() or x in "._- ")
-                    safe_filename += Path(att.name).suffix
-                    if i < 2:
-                        # Pre-download the first two songs
-                        file_path = self.media_manager.download_attachment(att)
-                        if file_path:
-                            filename = file_path.name
+
+            try:
+                cards = self.trello.get_queue_cards()
+                playlist = []
+
+                for card in cards:
+                    try:
+                        attachments = card.get_attachments()
+                        if attachments:
+                            att = attachments[0]
+                            # Compute a safe filename
+                            safe_filename = "".join(x for x in Path(att.name).stem if x.isalnum() or x in "._- ")
+                            safe_filename += Path(att.name).suffix
+
+                            playlist.append({
+                                'id': card.id,
+                                'name': card.name,
+                                'filename': safe_filename
+                            })
                         else:
-                            # If download fails, fall back to the safe filename.
-                            filename = safe_filename
-                    else:
-                        # For the rest, do not pre-download.
-                        # (If the file exists from a previous run, it will be served;
-                        # otherwise, it will be lazy-loaded by the client.)
-                        filename = safe_filename
-                    playlist.append({
-                        'id': card.id,
-                        'name': card.name,
-                        'filename': filename
-                    })
-                else:
-                    playlist.append({
-                        'id': card.id,
-                        'name': card.name,
-                        'filename': None
-                    })
-            return jsonify(playlist)
+                            playlist.append({
+                                'id': card.id,
+                                'name': card.name,
+                                'filename': None
+                            })
+                    except Exception as card_error:
+                        self.logger.error(f"Error processing card {card.name}: {str(card_error)}")
+                        continue
+
+                return jsonify(playlist)
+
+            except Exception as e:
+                self.logger.error(f"Error building playlist: {str(e)}")
+                return jsonify({'error': 'Failed to build playlist'}), 500
 
         @self.app.route('/media/<path:filename>')
         def serve_media(filename):
+            """
+            Serve media files from the media directory.
+            If file doesn't exist, try to download it first.
+            """
             try:
                 # Replace any plus signs with spaces if needed
                 filename = filename.replace('+', ' ')
-                self.logger.info(f"Serving file from {self.media_dir}: {filename}")
+                file_path = self.media_dir / filename
+
+                # If file doesn't exist, try to download it
+                if not file_path.exists() and self.trello:
+                    self.logger.info(f"File not found locally, attempting to download: {filename}")
+                    # Find the corresponding card and attachment
+                    cards = self.trello.get_queue_cards()
+                    for card in cards:
+                        attachments = card.get_attachments()
+                        if attachments:
+                            att = attachments[0]
+                            safe_filename = "".join(x for x in Path(att.name).stem if x.isalnum() or x in "._- ")
+                            safe_filename += Path(att.name).suffix
+                            if safe_filename == filename:
+                                # Found the matching attachment, download it
+                                downloaded_path = self.media_manager.download_attachment(att)
+                                if downloaded_path:
+                                    file_path = downloaded_path
+                                    break
+
+                if not file_path.exists():
+                    self.logger.error(f"File not found and could not be downloaded: {filename}")
+                    return "File not found", 404
+
+                self.logger.info(f"Serving file: {filename}")
                 return send_from_directory(self.media_dir, filename)
             except Exception as e:
                 self.logger.error(f"Error serving {filename}: {str(e)}")
                 return "Error serving file", 500
+
+        @self.app.route('/api/queue/status')
+        def get_queue_status():
+            """Get status of the current queue including download progress"""
+            try:
+                if not self.media_manager:
+                    return jsonify({'error': 'Media manager not initialized'}), 500
+
+                current_media = self.media_manager.current_media
+                return jsonify({
+                    'current_track': str(current_media) if current_media else None,
+                })
+            except Exception as e:
+                self.logger.error(f"Error getting queue status: {str(e)}")
+                return jsonify({'error': 'Failed to get queue status'}), 500
 
         @self.app.errorhandler(404)
         def not_found_error(error):
@@ -91,6 +132,7 @@ class StreamServer:
             return "Internal server error", 500
 
     def run(self, host: str = '0.0.0.0', port: int = 8080):
+        """Start the Flask server"""
         try:
             self.logger.info(f"Starting StreamServer on {host}:{port}")
             self.app.run(
