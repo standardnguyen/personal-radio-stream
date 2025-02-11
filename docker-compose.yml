@@ -13,7 +13,6 @@ services:
       - TRELLO_API_KEY=${TRELLO_API_KEY}
       - TRELLO_TOKEN=${TRELLO_TOKEN}
       - TRELLO_BOARD_NAME=🧱 Radio
-    # Add this command to check environment variables before starting
     command: >
       sh -c "
         echo 'Environment variables:' &&
@@ -25,3 +24,16 @@ services:
         cat config.ini &&
         python start_stream.py
       "
+
+  cleanup:
+    image: alpine:latest
+    volumes:
+      - ./downloaded_media:/media_to_clean
+    environment:
+      - TZ=America/Denver
+    command: >
+      sh -c "
+        echo '0 4 * * * rm -rf /media_to_clean/*' > /etc/crontabs/root &&
+        crond -f -l 2
+      "
+    restart: unless-stopped
