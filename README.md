@@ -33,8 +33,6 @@ Here’s a quick glimpse of the Infinity Stream web interface:
 
 ![Infinity Stream Screenshot](./screenshot.png)
 
-*(If the image doesn't appear, make sure a file named `screenshot.png` is in the same directory.)*
-
 ## Quick Start with Docker
 
 For local development and testing, run Infinity Stream using Docker Compose:
@@ -76,7 +74,7 @@ These variables are used to generate `config.ini` from `config.template.ini` at 
 
 To run the application **without Docker**:
 
-1. **Install dependencies** (Python 3.9+ recommended):
+1. **Install dependencies** (Python 3.13.1+ recommended):
    ```bash
    pip install -r requirements.txt
    ```
