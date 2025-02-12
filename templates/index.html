@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <title>Simple Player</title>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -15,21 +16,47 @@
       margin-top: 4px;
       overflow: hidden;
     }
+
     .progress-bar {
       background: #3b82f6;
       height: 100%;
       transition: width 0.25s linear;
     }
+
     .loading {
       opacity: 0.5;
       cursor: wait;
     }
   </style>
 </head>
+
 <body>
   <div id="root"></div>
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
+
+    const LoadingSpinner = () => {
+      return (
+        <div className="flex flex-col items-center justify-center p-8 space-y-4">
+          <div className="relative">
+            <div
+              className="w-12 h-12 rounded-full border-4 border-blue-200"
+              style={{
+                borderTopColor: '#3B82F6',
+                animation: 'spinner 0.8s linear infinite'
+              }}
+            />
+            <style>{`
+          @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}</style>
+          </div>
+          <div className="text-gray-600">Loading playlist...</div>
+        </div>
+      );
+    };
 
     const Button = React.forwardRef(({ className, children, variant = "default", size = "default", ...props }, ref) => {
       const baseStyles = "inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-gray-950 disabled:pointer-events-none disabled:opacity-50";
@@ -92,9 +119,11 @@
       const [progress, setProgress] = useState(0);
       const [error, setError] = useState(null);
       const [loading, setLoading] = useState(false);
+      const [isInitialLoading, setIsInitialLoading] = useState(true);
       const audioRef = useRef(new Audio());
 
       useEffect(() => {
+        setIsInitialLoading(true);
         fetch('/api/playlist')
           .then(res => res.json())
           .then(data => {
@@ -107,6 +136,9 @@
           .catch(err => {
             console.error('Failed to fetch playlist:', err);
             setError('Failed to load playlist');
+          })
+          .finally(() => {
+            setIsInitialLoading(false);
           });
       }, []);
 
@@ -129,8 +161,8 @@
           if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
           const blob = await response.blob();
           const mimeType = track.filename.endsWith('.mp3') ? 'audio/mpeg' :
-                          track.filename.endsWith('.wav') ? 'audio/wav' :
-                          track.filename.endsWith('.ogg') ? 'audio/ogg' : 'audio/mpeg';
+            track.filename.endsWith('.wav') ? 'audio/wav' :
+              track.filename.endsWith('.ogg') ? 'audio/ogg' : 'audio/mpeg';
           const mediaBlob = new Blob([blob], { type: mimeType });
           const url = URL.createObjectURL(mediaBlob);
 
@@ -227,58 +259,65 @@
               {error}
             </div>
           )}
-          <div className="mb-4">
-            <Button
-              className="w-full mb-4"
-              onClick={startPlaylist}
-              disabled={queue.length === 0 || loading}
-            >
-              {loading ? 'Loading...' : 'Start Playlist'}
-            </Button>
-          </div>
-          <div className="space-y-2">
-            {queue.map((track, index) => (
-              <div key={track.id} className={`flex flex-col bg-gray-100 rounded p-2 ${loading && !track.isLoaded ? 'loading' : ''}`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">{track.name}</div>
-                  <div className="flex gap-2">
-                    {currentTrack === index ? (
-                      isPlaying ? (
-                        <Button variant="secondary" onClick={pauseTrack}>
-                          <PauseIcon />
-                        </Button>
-                      ) : (
-                        <Button variant="default" onClick={resumeTrack}>
-                          <PlayIcon />
-                        </Button>
-                      )
-                    ) : (
-                      <Button
-                        variant="default"
-                        onClick={() => playTrack(track, index)}
-                        disabled={loading}
-                      >
-                        <PlayIcon />
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => deleteTrack(index)}
-                      disabled={currentTrack === index || loading}
-                    >
-                      <TrashIcon />
-                    </Button>
-                  </div>
-                </div>
-                {currentTrack === index && (
-                  <div className="progress-container">
-                    <div className="progress-bar" style={{ width: `${progress}%` }}></div>
-                  </div>
-                )}
+
+          {isInitialLoading ? (
+            <LoadingSpinner />
+          ) : (
+            <>
+              <div className="mb-4">
+                <Button
+                  className="w-full mb-4"
+                  onClick={startPlaylist}
+                  disabled={queue.length === 0 || loading}
+                >
+                  {loading ? 'Loading...' : 'Start Playlist'}
+                </Button>
               </div>
-            ))}
-          </div>
+              <div className="space-y-2">
+                {queue.map((track, index) => (
+                  <div key={track.id} className={`flex flex-col bg-gray-100 rounded p-2 ${loading && !track.isLoaded ? 'loading' : ''}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">{track.name}</div>
+                      <div className="flex gap-2">
+                        {currentTrack === index ? (
+                          isPlaying ? (
+                            <Button variant="secondary" onClick={pauseTrack}>
+                              <PauseIcon />
+                            </Button>
+                          ) : (
+                            <Button variant="default" onClick={resumeTrack}>
+                              <PlayIcon />
+                            </Button>
+                          )
+                        ) : (
+                          <Button
+                            variant="default"
+                            onClick={() => playTrack(track, index)}
+                            disabled={loading}
+                          >
+                            <PlayIcon />
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => deleteTrack(index)}
+                          disabled={currentTrack === index || loading}
+                        >
+                          <TrashIcon />
+                        </Button>
+                      </div>
+                    </div>
+                    {currentTrack === index && (
+                      <div className="progress-container">
+                        <div className="progress-bar" style={{ width: `${progress}%` }}></div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </Card>
       );
     }
@@ -287,4 +326,5 @@
     root.render(<SimplePlayer />);
   </script>
 </body>
+
 </html>
