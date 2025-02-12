@@ -3,6 +3,7 @@
 
 <head>
   <title>Simple Player</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -253,72 +254,86 @@
       }, [currentTrack, queue]);
 
       return (
-        <Card className="p-6 w-11/12 max-w-2xl mx-auto mt-8">
-          {error && (
-            <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
-              {error}
-            </div>
-          )}
+        <Card 
+          className="
+            p-6 
+            mx-auto 
+            mt-8 
+            w-[94%]          /* Base: on mobile screens use 94% width (3% margin each side) */
+            max-w-none       /* Base: remove any max-width on mobile so it uses the entire 94% */
+            sm:w-11/12       /* On screens ≥ 640px, revert to 11/12 width */
+            sm:max-w-2xl     /* On screens ≥ 640px, revert to max-width of 2xl */
+          "
+          >
+      {
+        error && (
+          <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
+            {error}
+          </div>
+        )
+      }
 
-          {isInitialLoading ? (
-            <LoadingSpinner />
-          ) : (
-            <>
-              <div className="mb-4">
-                <Button
-                  className="w-full mb-4"
-                  onClick={startPlaylist}
-                  disabled={queue.length === 0 || loading}
-                >
-                  {loading ? 'Loading...' : 'Start Playlist'}
-                </Button>
-              </div>
-              <div className="space-y-2">
-                {queue.map((track, index) => (
-                  <div key={track.id} className={`flex flex-col bg-gray-100 rounded p-2 ${loading && !track.isLoaded ? 'loading' : ''}`}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">{track.name}</div>
-                      <div className="flex gap-2">
-                        {currentTrack === index ? (
-                          isPlaying ? (
-                            <Button variant="secondary" onClick={pauseTrack}>
-                              <PauseIcon />
-                            </Button>
-                          ) : (
-                            <Button variant="default" onClick={resumeTrack}>
-                              <PlayIcon />
-                            </Button>
-                          )
+      {
+        isInitialLoading ? (
+          <LoadingSpinner />
+        ) : (
+          <>
+            <div className="mb-4">
+              <Button
+                className="w-full mb-4"
+                onClick={startPlaylist}
+                disabled={queue.length === 0 || loading}
+              >
+                {loading ? 'Loading...' : 'Start Playlist'}
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {queue.map((track, index) => (
+                <div key={track.id} className={`flex flex-col bg-gray-100 rounded p-2 ${loading && !track.isLoaded ? 'loading' : ''}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">{track.name}</div>
+                    <div className="flex gap-2">
+                      {currentTrack === index ? (
+                        isPlaying ? (
+                          <Button variant="secondary" onClick={pauseTrack}>
+                            <PauseIcon />
+                          </Button>
                         ) : (
-                          <Button
-                            variant="default"
-                            onClick={() => playTrack(track, index)}
-                            disabled={loading}
-                          >
+                          <Button variant="default" onClick={resumeTrack}>
                             <PlayIcon />
                           </Button>
-                        )}
+                        )
+                      ) : (
                         <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => deleteTrack(index)}
-                          disabled={currentTrack === index || loading}
+                          variant="default"
+                          onClick={() => playTrack(track, index)}
+                          disabled={loading}
                         >
-                          <TrashIcon />
+                          <PlayIcon />
                         </Button>
-                      </div>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => deleteTrack(index)}
+                        disabled={currentTrack === index || loading}
+                      >
+                        <TrashIcon />
+                      </Button>
                     </div>
-                    {currentTrack === index && (
-                      <div className="progress-container">
-                        <div className="progress-bar" style={{ width: `${progress}%` }}></div>
-                      </div>
-                    )}
                   </div>
-                ))}
-              </div>
-            </>
-          )}
-        </Card>
+                  {currentTrack === index && (
+                    <div className="progress-container">
+                      <div className="progress-bar" style={{ width: `${progress}%` }}></div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        )
+      }
+        </Card >
       );
     }
 
