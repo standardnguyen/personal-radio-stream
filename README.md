@@ -33,6 +33,11 @@ Here’s a quick glimpse of the Infinity Stream web interface:
 
 ![Infinity Stream Screenshot](./screenshot.png)
 
+
+And what the trello queue looks like:
+
+![Trello Queue Screenshot](./screenshot2.png)
+
 ## Quick Start with Docker
 
 For local development and testing, run Infinity Stream using Docker Compose:
